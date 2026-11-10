@@ -184,7 +184,7 @@ const dashboardHtml = `<!doctype html>
       <input id="pairInput" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="2347087299884">
       <button id="reqBtn">Get code</button>
     </div>
-    <p class="hint">Type any number (international format, no +) and a code is generated for exactly that phone — then type the code on THAT phone.</p>
+    <p class="hint">Type any number — international like 2347087299884 or local like 07087299884 — and a code is generated for exactly that phone.</p>
     <div class="divider">live pairing log</div>
     <div class="log" id="pairLog">waiting for the first code…</div>
     <button id="resetBtn">Start completely over ↻</button>

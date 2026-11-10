@@ -32,6 +32,25 @@ const PAIRING_CODE = String(process.env.PAIRING_CODE || "").trim().toUpperCase()
 const CUSTOM_PAIRING = /^[A-Z0-9]{8}$/.test(PAIRING_CODE) ? PAIRING_CODE : null;
 const MIN_PAIRING_INTERVAL_MS = 30000;
 
+// A number typed in local format (e.g. Nigeria 0708...) used to be sent to
+// WhatsApp as-is, producing a pairing request for a nonsense international
+// number (+070...). The code then could never match the phone that typed it —
+// every login showed "Logging in…" and cancelled. Convert local formats to
+// international using the owner's country code as the default.
+const DEFAULT_COUNTRY_CODE = (() => {
+  const owner = String(appConfig.ownerNumbers[0] || "").replace(/\D/g, "");
+  return owner && !owner.startsWith("0") ? owner.slice(0, 3) : "234";
+})();
+
+function normalizePairingNumber(raw) {
+  let digits = String(raw || "").replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.startsWith("0") && digits.length >= 10 && digits.length <= 12) {
+    digits = DEFAULT_COUNTRY_CODE + digits.slice(1);
+  }
+  return digits;
+}
+
 // Version markers exposed on /status — they prove which build (and which
 // Baileys fork) is actually running, which matters when debugging remotes.
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -292,14 +311,17 @@ export class DamzDBot {
   // when configured, otherwise the stock random 8-digit one. Every caller goes
   // through here so the dashboard state (code, age, log) updates in one place.
   async issueCode(sock, number) {
+    // Single choke point: whatever number comes in — env fallback, dashboard
+    // box, refresh button — it goes out international, never local format.
+    const target = normalizePairingNumber(number);
     const ask = async () => {
       if (CUSTOM_PAIRING) {
         try {
-          const custom = await sock.requestPairingCode(number, CUSTOM_PAIRING);
+          const custom = await sock.requestPairingCode(target, CUSTOM_PAIRING);
           if (custom) return custom;
         } catch { /* some servers refuse custom codes — fall back */ }
       }
-      return sock.requestPairingCode(number);
+      return sock.requestPairingCode(target);
     };
     // A dying socket sometimes never answers — never leave the dashboard
     // button hanging on "Asking…" longer than 20 seconds.
@@ -310,7 +332,7 @@ export class DamzDBot {
     this.pairingCode = code;
     this.pairingCodeAt = Date.now();
     this.lastPairingIssueAt = Date.now();
-    this.logPairing("code " + code + " issued for +" + number + (CUSTOM_PAIRING ? " (fixed)" : ""));
+    this.logPairing("code " + code + " issued for +" + target + (CUSTOM_PAIRING ? " (fixed)" : ""));
     return code;
   }
 
@@ -551,9 +573,11 @@ export class DamzDBot {
   // owner types. Private deploy — and a pairing code is useless to a stranger
   // without physical access to that phone, so no auth is needed here.
   async requestPairingForNumber(number) {
-    const digits = String(number || "").replace(/\D/g, "");
+    const raw = String(number || "").replace(/\D/g, "");
     if (this.connected || this.stopped) return { ok: false, error: "already connected — no pairing needed" };
-    if (digits.length < 8 || digits.length > 15) return { ok: false, error: "type the full number in international format, e.g. 2347087299884" };
+    const digits = normalizePairingNumber(raw);
+    if (digits.length < 8 || digits.length > 15) return { ok: false, error: "type the full number, e.g. 2347087299884 (or local 07087299884)" };
+    if (digits !== raw) this.logPairing("local number " + raw + " read as +" + digits);
     const now = Date.now();
     if (now - (this.lastManualPairingAt || 0) < 5000) return { ok: false, error: "one moment — try again in a few seconds" };
     this.lastManualPairingAt = now;
