@@ -1,4 +1,9 @@
-import { pick, randomInt } from "../src/utils.js";
+import { pick, randomInt, quotedText, quotedParticipant } from "../src/utils.js";
+import {
+  randomJoke, dadJoke, chuckJoke, programmingJoke, uselessFact, catFact,
+  advice, zenQuote, numberFact, historyToday, dogImage, catImage, foxImage, randomMeme
+} from "../src/apis.js";
+import { fetchBuffer } from "../src/apis.js";
 
 const eightBall = [
   "Yes, definitely. ✅",
@@ -65,6 +70,12 @@ const activities = [
   "Recommend one book, film or show worth people's time."
 ];
 
+const greetings = [
+  "Hello there. 😊 How is your day going?",
+  "Hey! Good to see you around. What is new?",
+  "Hi! I was just here, keeping things quiet. What can I do for you?"
+];
+
 const pending = new Map();
 
 function normalizeAnswer(value) {
@@ -115,6 +126,14 @@ function calculateExpression(raw) {
   } catch {
     throw new Error("I could not work that one out — check the expression");
   }
+}
+
+async function sendPicture(ctx, urlPromise, caption) {
+  await ctx.typing(1000);
+  const url = await urlPromise;
+  if (!url) throw new Error("the service had nothing for me just now — try again");
+  const buffer = await fetchBuffer(url, { timeoutMs: 60000, label: "picture service" });
+  await ctx.send({ image: buffer, caption });
 }
 
 export default [
@@ -180,18 +199,6 @@ export default [
     }
   },
   {
-    name: "quote",
-    category: "Games",
-    description: "a short thought for the day",
-    run: async ctx => ctx.reply("❝ " + pick(quotes) + " ❞")
-  },
-  {
-    name: "joke",
-    category: "Games",
-    description: "a light joke",
-    run: async ctx => ctx.reply(pick(jokes))
-  },
-  {
     name: "activity",
     category: "Games",
     description: "a conversation starter for the group",
@@ -219,6 +226,182 @@ export default [
         "*" + names[0] + "* and *" + names[1] + "* score " + score + "%." +
         (score > 80 ? " That is something special. 💞" : score > 60 ? " There is real potential there. 😊" : " It could work, with effort. 🙂")
       );
+    }
+  },
+  {
+    name: "quote",
+    category: "Fun",
+    description: "a short thought for the day",
+    run: async ctx => ctx.reply("❝ " + pick(quotes) + " ❞")
+  },
+  {
+    name: "quote2",
+    category: "Fun",
+    description: "an inspirational quote with its author",
+    run: async ctx => {
+      await ctx.typing(900);
+      await ctx.reply(await zenQuote());
+    }
+  },
+  {
+    name: "joke",
+    category: "Fun",
+    description: "a light joke",
+    run: async ctx => ctx.reply(pick(jokes))
+  },
+  {
+    name: "dadjoke",
+    category: "Fun",
+    description: "a fresh dad joke",
+    run: async ctx => {
+      await ctx.typing(800);
+      await ctx.reply(await dadJoke());
+    }
+  },
+  {
+    name: "chuck",
+    category: "Fun",
+    description: "a Chuck Norris joke",
+    run: async ctx => {
+      await ctx.typing(800);
+      await ctx.reply(await chuckJoke());
+    }
+  },
+  {
+    name: "progjoke",
+    category: "Fun",
+    description: "a programming joke",
+    run: async ctx => {
+      await ctx.typing(800);
+      await ctx.reply(await programmingJoke());
+    }
+  },
+  {
+    name: "randomjoke",
+    category: "Fun",
+    description: "a random joke from the internet",
+    run: async ctx => {
+      await ctx.typing(800);
+      try {
+        await ctx.reply(await randomJoke());
+      } catch {
+        await ctx.reply(pick(jokes));
+      }
+    }
+  },
+  {
+    name: "fact2",
+    category: "Fun",
+    description: "a random (useless but fun) fact",
+    run: async ctx => {
+      await ctx.typing(800);
+      await ctx.reply("🧠 " + await uselessFact());
+    }
+  },
+  {
+    name: "catfact",
+    category: "Fun",
+    description: "a fact about cats",
+    run: async ctx => {
+      await ctx.typing(800);
+      await ctx.reply("🐱 " + await catFact());
+    }
+  },
+  {
+    name: "advice",
+    category: "Fun",
+    description: "a random piece of advice",
+    run: async ctx => {
+      await ctx.typing(800);
+      await ctx.reply("💡 " + await advice());
+    }
+  },
+  {
+    name: "numfact",
+    category: "Fun",
+    description: "a curious fact about a random number",
+    run: async ctx => {
+      await ctx.typing(800);
+      await ctx.reply("🔢 " + await numberFact());
+    }
+  },
+  {
+    name: "history",
+    category: "Fun",
+    description: "what happened on this day in history",
+    run: async ctx => {
+      await ctx.typing(800);
+      await ctx.reply("📅 " + await historyToday());
+    }
+  },
+  {
+    name: "dog",
+    category: "Fun",
+    description: "a random dog photo",
+    run: async ctx => sendPicture(ctx, dogImage(), "🐶 Here you go.")
+  },
+  {
+    name: "cat",
+    category: "Fun",
+    description: "a random cat photo",
+    run: async ctx => sendPicture(ctx, catImage(), "🐱 Here you go.")
+  },
+  {
+    name: "fox",
+    category: "Fun",
+    description: "a random fox photo",
+    run: async ctx => sendPicture(ctx, foxImage(), "🦊 Here you go.")
+  },
+  {
+    name: "meme",
+    category: "Fun",
+    description: "a random meme",
+    run: async ctx => {
+      await ctx.typing(1000);
+      const meme = await randomMeme();
+      const buffer = await fetchBuffer(meme.url, { timeoutMs: 60000, label: "meme service" });
+      await ctx.send({ image: buffer, caption: meme.title ? "*" + meme.title + "*" : "" });
+    }
+  },
+  {
+    name: "hello",
+    category: "Fun",
+    description: "say hello to me",
+    run: async ctx => ctx.reply(pick(greetings))
+  },
+  {
+    name: "echo",
+    aliases: ["say"],
+    category: "Fun",
+    description: "repeat your text back",
+    run: async ctx => {
+      const text = String(ctx.args || "").trim();
+      if (!text) throw new Error("give me something to repeat");
+      await ctx.reply(text);
+    }
+  },
+  {
+    name: "quoted",
+    category: "Fun",
+    description: "repeat the text of a replied-to message",
+    run: async ctx => {
+      const text = quotedText(ctx.msg.message);
+      if (!text) throw new Error("reply to a text message and I will echo it");
+      await ctx.reply(text);
+    }
+  },
+  {
+    name: "react",
+    category: "Fun",
+    description: "react to a message, e.g. .react 🔥",
+    run: async ctx => {
+      const emoji = String(ctx.args || "").trim().split(/\s+/)[0];
+      if (!emoji) throw new Error("give me an emoji to react with");
+      const info = ctx.msg.message?.extendedTextMessage?.contextInfo;
+      if (!info?.stanzaId) throw new Error("reply to the message I should react to");
+      await ctx.sock.sendMessage(ctx.jid, {
+        react: { text: emoji, key: { remoteJid: ctx.jid, id: info.stanzaId, fromMe: info.participant === ctx.sock?.user?.id, participant: info.participant } }
+      });
     }
   }
 ];

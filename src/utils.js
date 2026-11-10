@@ -2,6 +2,7 @@ const WRAPPER_KEYS = [
   "ephemeralMessage",
   "viewOnceMessage",
   "viewOnceMessageV2",
+  "viewOnceMessageV2Extension",
   "documentWithCaptionMessage",
   "deviceSentMessage"
 ];
@@ -84,7 +85,11 @@ export async function fetchJson(url, { timeoutMs = 60000, label = "service", hea
   let response;
   try {
     response = await fetch(url, {
-      headers: { accept: "application/json", ...(headers || {}) },
+      headers: {
+        accept: "application/json",
+        "user-agent": "DamzD-Bot/1.1 (personal WhatsApp assistant)",
+        ...(headers || {})
+      },
       signal: AbortSignal.timeout(timeoutMs)
     });
   } catch (error) {

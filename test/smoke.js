@@ -91,12 +91,63 @@ await check("ping command replies with uptime", async () => {
   assert.match(sent[0].content.text, /here and running/);
 });
 
-await check("menu lists commands without any promo footer", async () => {
+await check("menu shows section overview without any promo footer", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".menu"));
   const text = sent.map(item => item.content.text || "").join("\n");
-  assert.match(text, /menu — show everything/);
+  assert.match(text, /Here is everything I can do/);
+  assert.match(text, /\*News\*/);
+  assert.match(text, /\*Anime\*/);
   assert.ok(!/powered by|pairing portal|benfei/i.test(text), "no promotional text allowed");
+});
+
+await check("menu section opens with full command list", async () => {
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".menu news"));
+  const text = sent.at(-1).content.text;
+  assert.match(text, /\*News\*/);
+  assert.match(text, /\.bbc — /);
+});
+
+await check("the expanded command set loaded with clean aliases", async () => {
+  assert.ok(commands.length >= 150, "expected 150+ commands, got " + commands.length);
+  assert.equal(lookup.get("ytmp4").name, "yt", "ytmp4 maps to yt");
+  assert.equal(lookup.get("ttdl").name, "tiktok", "ttdl maps to tiktok");
+  assert.equal(lookup.get("uptime").name, "alive", "uptime maps to alive");
+  assert.equal(lookup.get("summarize").name, "tldr", "summarize maps to tldr");
+  assert.ok(!lookup.has("ytmp3"), "ytmp3 was removed as requested");
+  assert.ok(!lookup.has("benfei"), "no benfei branding");
+});
+
+await check("echo repeats text exactly", async () => {
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".echo testing one two"));
+  assert.equal(sent.at(-1).content.text, "testing one two");
+});
+
+await check("whoami introduces the sender", async () => {
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".whoami"));
+  assert.match(sent.at(-1).content.text, /You are @2348000000002/);
+});
+
+await check("news command lists its desks", async () => {
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".news"));
+  const text = sent.at(-1).content.text;
+  assert.match(text, /bbc/i);
+  assert.match(text, /punch/i);
+});
+
+await check("anime reaction command list is wired to categories", async () => {
+  const names = new Set(commands.map(command => command.name));
+  for (const expected of ["hug", "kiss", "slap", "pat", "yeet", "waifu", "8ball"]) {
+    assert.ok(names.has(expected), "missing command: " + expected);
+  }
+  const canvasNames = new Set(commands.map(command => command.name));
+  for (const expected of ["fakettc", "receipt", "nokiamsg", "iqc", "fakeff"]) {
+    assert.ok(canvasNames.has(expected), "missing canvas command: " + expected);
+  }
 });
 
 await check("unknown command in DM gets a gentle suggestion", async () => {

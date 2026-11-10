@@ -1,5 +1,9 @@
 node_modules/
-.env
 auth/
 data/
+.env
 *.log
+bot.log
+test/.tmp-data/
+__pycache__/
+.DS_Store

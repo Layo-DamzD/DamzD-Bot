@@ -1,0 +1,34 @@
+# Render Blueprint — DamzD WhatsApp bot
+# Deploy: Render Dashboard → New → Blueprint → pick this repo.
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: damzd
+    runtime: node
+    plan: free
+    healthCheckPath: /health
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20.9.0"
+      - key: BOT_NAME
+        value: DamzD
+      - key: OWNER_NAME
+        sync: false    # your name, e.g. Layo
+      - key: OWNER_NUMBER
+        sync: false    # international format, no + — e.g. 2347087299884
+      - key: GROQ_API_KEY
+        sync: false    # free key from console.groq.com
+      # PAIRING_CODE is intentionally NOT set: codes rotate (fresh random 8-digit
+      # one per request) so a dead code is always visible on the dashboard. Set a
+      # fixed 8-char A-Z0-9 value here only if you really want a constant code.
+      - key: ACCESS_MODE
+        value: self
+      - key: PREFIX
+        value: "."
+      - key: AUTO_DL
+        value: "true"
+      - key: LOG_LEVEL
+        value: warn

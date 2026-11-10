@@ -2,8 +2,8 @@ import { config, hasAIBrain } from "./config.js";
 
 export { hasAIBrain };
 
-export function systemPrompt({ ownerName } = {}) {
-  return [
+export function systemPrompt({ ownerName, style } = {}) {
+  const base = [
     `You are ${config.name}, a calm, warm and well-mannered assistant chatting on WhatsApp.`,
     `You were set up by ${ownerName || config.ownerName}, and you help people with questions,`,
     "advice, explanations, quick tasks and friendly conversation.",
@@ -23,6 +23,8 @@ export function systemPrompt({ ownerName } = {}) {
     "- Match the language the person writes in.",
     "- You may be playful when the mood is playful, but you never lose your calm manners."
   ].join(" ");
+  const flavour = String(style || "").trim();
+  return flavour ? base + "\n\nSpecial mode for this request: " + flavour : base;
 }
 
 function stripThinking(text) {
@@ -75,16 +77,46 @@ async function callOpenAICompatible({ url, apiKey, model, messages, label, extra
   return stripThinking(text);
 }
 
-export async function askAI({ messages, ownerName } = {}) {
-  if (!hasAIBrain()) {
-    throw new Error(
-      "No AI key is configured yet. Add a free Groq key (GROQ_API_KEY) to the .env file and restart."
-    );
+async function callPollinations(messages) {
+  let response;
+  try {
+    response = await fetch("https://text.pollinations.ai/openai", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "openai", messages }),
+      signal: AbortSignal.timeout(90000)
+    });
+  } catch (error) {
+    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+      throw new Error("the free AI service took too long. Try again in a moment.");
+    }
+    throw new Error("could not reach the free AI service right now.");
   }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error("the free AI service returned something unreadable. Try again.");
+  }
+  if (!response.ok) {
+    const detail = payload?.error?.message || payload?.error || payload?.message;
+    throw new Error(typeof detail === "string" && detail.trim()
+      ? detail.trim().slice(0, 180)
+      : "the free AI service refused that request.");
+  }
+  const text = payload?.choices?.[0]?.message?.content;
+  if (!text || !String(text).trim()) {
+    throw new Error("the free AI service had nothing to say. Try rephrasing.");
+  }
+  return stripThinking(text);
+}
+
+export async function askAI({ messages, ownerName, style } = {}) {
   const chat = [
-    { role: "system", content: systemPrompt({ ownerName }) },
+    { role: "system", content: systemPrompt({ ownerName, style }) },
     ...(Array.isArray(messages) ? messages.slice(-18) : [])
   ];
+  const failures = [];
   if (config.groq.apiKey) {
     try {
       return await callOpenAICompatible({
@@ -95,26 +127,34 @@ export async function askAI({ messages, ownerName } = {}) {
         label: "AI service"
       });
     } catch (error) {
-      if (!config.openrouter.apiKey) throw error;
+      failures.push(error?.message);
     }
   }
-  return callOpenAICompatible({
-    url: config.openrouter.url,
-    apiKey: config.openrouter.apiKey,
-    model: config.openrouter.model,
-    messages: chat,
-    label: "backup AI service",
-    extraHeaders: {
-      "HTTP-Referer": "https://damzd.local",
-      "X-Title": config.name
+  if (config.openrouter.apiKey) {
+    try {
+      return await callOpenAICompatible({
+        url: config.openrouter.url,
+        apiKey: config.openrouter.apiKey,
+        model: config.openrouter.model,
+        messages: chat,
+        label: "backup AI service",
+        extraHeaders: {
+          "HTTP-Referer": "https://damzd.local",
+          "X-Title": config.name
+        }
+      });
+    } catch (error) {
+      failures.push(error?.message);
     }
-  });
+  }
+  // Keyless fallback so the bot keeps chatting even before any API key is added.
+  return callPollinations(chat);
 }
 
-export async function askAIAboutText({ prompt, history = [], ownerName } = {}) {
+export async function askAIAboutText({ prompt, history = [], ownerName, style } = {}) {
   const messages = [
     ...history,
     { role: "user", content: String(prompt || "").slice(0, 3500) }
   ];
-  return askAI({ messages, ownerName });
+  return askAI({ messages, ownerName, style });
 }

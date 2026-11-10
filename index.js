@@ -13,8 +13,7 @@ const directory = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
   if (!config.ownerNumbers.length) {
-    console.error("Missing OWNER_NUMBER in your .env file. See .env.example for the format.");
-    process.exit(1);
+    console.log("[" + config.name + "] No OWNER_NUMBER set — the number that pairs first becomes the owner automatically.");
   }
 
   for (const folder of [config.sessionDirectory, config.dataDirectory]) {
@@ -27,7 +26,7 @@ async function main() {
   const store = new JsonStore(path.resolve(config.dataDirectory), "settings.json");
 
   const bot = new DamzDBot({ commands, lookup, memory, store });
-  startHealthServer(() => bot.status(), config.port);
+  startHealthServer(bot, config.port);
 
   console.log("[" + config.name + "] starting with " + commands.length + " commands, access mode: " + config.accessMode);
   await bot.start();

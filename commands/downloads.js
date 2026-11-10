@@ -8,6 +8,8 @@ import {
   cleanTitle,
   PLATFORM_HOSTS
 } from "../src/downloads.js";
+import { fetchBuffer } from "../src/apis.js";
+import { videoToMp3 } from "../src/mediautil.js";
 
 async function deliver(ctx, resolved) {
   const info = mediaKind(resolved.item, resolved.url);
@@ -46,7 +48,7 @@ export default [
   },
   {
     name: "tiktok",
-    aliases: ["tt"],
+    aliases: ["tt", "ttdl"],
     category: "Downloads",
     description: "download a TikTok video",
     run: async ctx => {
@@ -56,8 +58,29 @@ export default [
     }
   },
   {
+    name: "tiktok2",
+    category: "Downloads",
+    description: "download a TikTok video (backup service)",
+    run: async ctx => {
+      const url = requirePlatformUrl(ctx.args, "TikTok", PLATFORM_HOSTS.tiktok);
+      await ctx.typing(1000);
+      const { fetchJson } = await import("../src/utils.js");
+      const payload = await fetchJson("https://tikwm.com/api/?url=" + encodeURIComponent(url), {
+        timeoutMs: 90000,
+        label: "TikTok service"
+      });
+      const data = payload?.data || {};
+      const video = String(data?.play || data?.hdplay || "").trim();
+      if (!/^https:\/\//.test(video)) throw new Error("the backup service found no file for that link");
+      await ctx.send({ video: { url: video }, mimetype: "video/mp4", caption: "*" + cleanTitle(data?.title || "TikTok video") + "*" });
+      if (data?.music && /^https:\/\//.test(String(data.music))) {
+        await ctx.send({ audio: { url: data.music }, mimetype: "audio/mpeg", ptt: false });
+      }
+    }
+  },
+  {
     name: "insta",
-    aliases: ["ig"],
+    aliases: ["ig", "instagram"],
     category: "Downloads",
     description: "download Instagram media",
     run: async ctx => {
@@ -113,6 +136,41 @@ export default [
         audio: { url: result.url },
         mimetype: "audio/mpeg",
         fileName: cleanTitle(result.title) + ".mp3",
+        ptt: false
+      });
+    }
+  },
+  {
+    name: "play2",
+    category: "Downloads",
+    description: "send a song as audio (alternate path)",
+    run: async ctx => {
+      const query = String(ctx.args || "").trim();
+      if (!query) throw new Error("tell me the song or artist name");
+      await ctx.typing(1500);
+      const videos = await searchYouTube(query);
+      const first = videos.find(item => item.url) || videos[0];
+      if (!first?.url) throw new Error("nothing turned up for that search");
+      const resolved = await resolveYouTubeVideo(first.url);
+      const buffer = await fetchBuffer(resolved.url, { timeoutMs: 150000, label: "YouTube service" });
+      const mp3 = await videoToMp3(buffer);
+      await ctx.send({ audio: mp3, mimetype: "audio/mpeg", fileName: cleanTitle(resolved.title) + ".mp3", ptt: false });
+    }
+  },
+  {
+    name: "spotify",
+    category: "Downloads",
+    description: "find a track and send a preview",
+    run: async ctx => {
+      const query = String(ctx.args || "").trim();
+      if (!query) throw new Error("tell me the track name");
+      await ctx.typing(1000);
+      const { spotifyPreview } = await import("../src/apis.js");
+      const track = await spotifyPreview(query);
+      await ctx.send({
+        audio: { url: track.preview },
+        mimetype: "audio/mpeg",
+        fileName: cleanTitle(track.artist + " - " + track.title + " (preview)") + ".mp3",
         ptt: false
       });
     }

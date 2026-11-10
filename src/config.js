@@ -11,6 +11,17 @@ function parseList(value) {
 
 const ownerNumbers = parseList(process.env.OWNER_NUMBER);
 
+// Numbers adopted at runtime (e.g. the number that paired first when
+// OWNER_NUMBER was not configured in .env).
+const runtimeOwners = [];
+
+export function addRuntimeOwner(number) {
+  const digitsOnly = String(number || "").replace(/\D/g, "");
+  if (digitsOnly && !ownerNumbers.includes(digitsOnly) && !runtimeOwners.includes(digitsOnly)) {
+    runtimeOwners.push(digitsOnly);
+  }
+}
+
 const accessMode = String(process.env.ACCESS_MODE || "self").trim().toLowerCase() === "public"
   ? "public"
   : "self";
@@ -46,5 +57,9 @@ export function hasAIBrain() {
 export function isOwnerNumber(value) {
   const number = digits(value);
   if (!number) return false;
-  return config.ownerNumbers.includes(number);
+  return ownerNumbers.includes(number) || runtimeOwners.includes(number);
+}
+
+export function ownerDisplayNumber() {
+  return ownerNumbers[0] || runtimeOwners[0] || "";
 }

@@ -3,21 +3,46 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestWaWebVersion,
   useMultiFileAuthState
-} from "@whiskeysockets/baileys";
+} from "baileys";
 import path from "node:path";
+import fs from "node:fs";
 import readline from "node:readline/promises";
+import { fileURLToPath } from "node:url";
 import pino from "pino";
+import QRCode from "qrcode";
 
 import { createContext } from "./context.js";
 import { resolveCommandInput } from "./loader.js";
 import { askAI, hasAIBrain } from "./ai.js";
 import { detectPlatform, resolveAllInOne, mediaKind, cleanTitle } from "./downloads.js";
 import { messageText, mentionedJids, quotedParticipant, numberFromJid, sleep } from "./utils.js";
-import { config as appConfig, isOwnerNumber } from "./config.js";
+import { config as appConfig, isOwnerNumber, addRuntimeOwner } from "./config.js";
 import { WELCOME_ON, GOODBYE_ON, ANTILINK_ON } from "./store.js";
+import { registerCallHook, runSideEffects } from "./hooks.js";
 
 const MAX_PROCESSED_IDS = 2000;
 const AI_COOLDOWN_MS = 2500;
+// Pairing codes expire in roughly a minute, and every new request kills the
+// previous one. A fixed code string hid that rotation — the dashboard always
+// showed the same 8 characters, so a person could keep typing a code that was
+// already dead and get "check if the code is correct". Every request now
+// returns a fresh random 8-digit code (WhatsApp's own format), so a changed
+// code is always visible. PAIRING_CODE env still forces a fixed string.
+const PAIRING_CODE = String(process.env.PAIRING_CODE || "").trim().toUpperCase();
+const CUSTOM_PAIRING = /^[A-Z0-9]{8}$/.test(PAIRING_CODE) ? PAIRING_CODE : null;
+const MIN_PAIRING_INTERVAL_MS = 30000;
+
+// Version markers exposed on /status — they prove which build (and which
+// Baileys fork) is actually running, which matters when debugging remotes.
+const here = path.dirname(fileURLToPath(import.meta.url));
+const APP_VERSION = (() => {
+  try { return String(JSON.parse(fs.readFileSync(path.join(here, "../package.json"), "utf8")).version); }
+  catch { return "dev"; }
+})();
+const LIB_VERSION = (() => {
+  try { return String(JSON.parse(fs.readFileSync(path.join(here, "../node_modules/baileys/package.json"), "utf8")).version); }
+  catch { return "unknown"; }
+})();
 const lastAIByChat = new Map();
 let aiQueue = Promise.resolve();
 
@@ -152,6 +177,7 @@ export async function processMessage(deps, sock, msg) {
 
   const ctx = createContext({ sock, msg, config: appConfig, store: deps.store, memory: deps.memory });
   ctx.commands = deps.commands || [];
+  if (!ctx.isOwner && deps.store.get("banned", []).includes(ctx.senderNumber)) return;
   const restricted = !allowedSender(ctx);
 
   if (ctx.isGroup) {
@@ -237,18 +263,77 @@ export class DamzDBot {
     this.processed = new Set();
     this.sock = null;
     this.connected = false;
+    this.pairingCode = null;
+    this.pairingCodeAt = null;
     this.startedAt = Date.now();
     this.stopped = false;
+    this.introSent = false;
+    this.pairingWasFresh = false;
+    this.pairingTarget = null;   // the number the current code is for (manual input can change it)
+    this.qrString = null;
+    this.qrDataUrl = null;
+    this.qrAt = null;
+    this.lastManualPairingAt = 0;
+    this.qrMode = false;      // "scan the QR" mode pauses background pairing codes
+    this.resetting = false;   // a full reset from the dashboard is in progress
+    this.authState = null;    // saved so mode switches can re-trigger pairing
+    this.pairingLog = [];
     this.logger = pino({ level: appConfig.logLevel });
+  }
+
+  // Rolling diagnostics window shown on the dashboard — the owner sees exactly
+  // what WhatsApp answered (code issued, refused, socket cycled) without logs.
+  logPairing(event) {
+    this.pairingLog.push({ at: Date.now(), event: String(event).slice(0, 140) });
+    if (this.pairingLog.length > 8) this.pairingLog.shift();
+  }
+
+  // One canonical way to ask WhatsApp for a pairing code: the fixed env code
+  // when configured, otherwise the stock random 8-digit one. Every caller goes
+  // through here so the dashboard state (code, age, log) updates in one place.
+  async issueCode(sock, number) {
+    const ask = async () => {
+      if (CUSTOM_PAIRING) {
+        try {
+          const custom = await sock.requestPairingCode(number, CUSTOM_PAIRING);
+          if (custom) return custom;
+        } catch { /* some servers refuse custom codes — fall back */ }
+      }
+      return sock.requestPairingCode(number);
+    };
+    // A dying socket sometimes never answers — never leave the dashboard
+    // button hanging on "Asking…" longer than 20 seconds.
+    const code = await Promise.race([
+      ask(),
+      sleep(20000).then(() => { throw new Error("WhatsApp did not answer in time — try again"); })
+    ]);
+    this.pairingCode = code;
+    this.pairingCodeAt = Date.now();
+    this.lastPairingIssueAt = Date.now();
+    this.logPairing("code " + code + " issued for +" + number + (CUSTOM_PAIRING ? " (fixed)" : ""));
+    return code;
   }
 
   status() {
     return {
       name: appConfig.name,
+      ownerName: appConfig.ownerName,
       connected: this.connected,
+      pairingCode: this.pairingCode || null,
+      pairingCodeAgeSeconds: this.pairingCode ? Math.floor((Date.now() - (this.pairingCodeAt || Date.now())) / 1000) : null,
+      pairingNumber: this.connected ? null : (this.pairingTarget || appConfig.ownerNumbers[0] || null),
+      number: this.connected ? numberFromJid(this.sock?.user?.id || "") || null : null,
+      qr: (!this.connected && this.qrDataUrl && this.qrAt && Date.now() - this.qrAt <= 65000) ? this.qrDataUrl : null,
+      qrAgeSeconds: (!this.connected && this.qrAt) ? Math.floor((Date.now() - this.qrAt) / 1000) : null,
+      qrMode: !!this.qrMode,
+      resetting: !!this.resetting,
       uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
       commands: this.commands.length,
-      accessMode: appConfig.accessMode
+      accessMode: appConfig.accessMode,
+      aiBrain: hasAIBrain(),
+      appVersion: APP_VERSION,
+      lib: "baileys " + LIB_VERSION,
+      pairingLog: this.pairingLog
     };
   }
 
@@ -257,7 +342,12 @@ export class DamzDBot {
     const { state, saveCreds } = await useMultiFileAuthState(sessionDirectory);
     let version;
     try {
-      const fetched = await fetchLatestWaWebVersion();
+      // fetchLatestWaWebVersion is known to hang on some networks — never let
+      // it block the boot for more than a few seconds.
+      const fetched = await Promise.race([
+        fetchLatestWaWebVersion().catch(() => null),
+        sleep(6000).then(() => null)
+      ]);
       if (Array.isArray(fetched?.version)) version = fetched.version;
     } catch {
       version = undefined;
@@ -272,24 +362,102 @@ export class DamzDBot {
       syncFullHistory: false
     });
     this.sock = sock;
+    this.authState = state;
 
     sock.ev.on("creds.update", saveCreds);
+    registerCallHook(sock, this.store);
 
     sock.ev.on("connection.update", update => {
       const { connection, lastDisconnect } = update;
+      // Keep the latest QR for the dashboard's scan-to-link fallback — that is
+      // the pairing path the patched library's fix was confirmed for.
+      if (update.qr) {
+        this.qrString = String(update.qr);
+        this.qrAt = Date.now();
+        QRCode.toDataURL(this.qrString, { margin: 2, width: 320 })
+          .then(url => { if (this.qrString === String(update.qr)) this.qrDataUrl = url; })
+          .catch(() => {});
+      }
+      // WhatsApp issues a fresh QR every ~20s while unregistered. Each QR is a
+      // safe moment to ask for a pairing code: the handshake is complete then.
+      // Requesting earlier (right after socket start) yields codes that
+      // WhatsApp rejects with "check if the code is correct".
+      // QR scan mode: while it is on, no pairing codes are requested in the
+      // background. Every code request moves the WhatsApp linking session
+      // forward and silently invalidates the QR currently on screen, so a
+      // scan only succeeds when nothing else is touching the connection.
+      if (update.qr && !state.creds?.registered && !this.qrMode) {
+        const now = Date.now();
+        // A number typed into the dashboard makes the next QR urgent: shorten
+        // the throttle so the code lands on the fresh socket quickly.
+        const manual = now - (this.lastManualPairingAt || 0) < 120000;
+        const windowMs = manual ? 15000 : MIN_PAIRING_INTERVAL_MS;
+        if (!this.lastPairingIssueAt || now - this.lastPairingIssueAt >= windowMs) {
+          this.lastPairingIssueAt = now;
+          this.pairingGeneration = (this.pairingGeneration || 0) + 1;
+          const generation = this.pairingGeneration;
+          // Fire and forget: a newer QR or socket supersedes stale requests
+          // through the generation check, so retries never pile up.
+          this.requestPairing(state, sock, generation).catch(() => {});
+        }
+      }
       if (connection === "open") {
         this.connected = true;
+        this.pairingCode = null;
+        this.pairingCodeAt = null;
+        this.pairingTarget = null;
+        this.qrString = null;
+        this.qrDataUrl = null;
+        this.qrAt = null;
+        const ownNumber = numberFromJid(sock.user?.id || "");
+        if (ownNumber) addRuntimeOwner(ownNumber);
         console.log("[" + appConfig.name + "] connected as " + (sock.user?.id || "unknown"));
+        if (this.pairingWasFresh && !this.introSent) {
+          this.introSent = true;
+          const hello =
+            "✅ Linked successfully. I am " + appConfig.name + " — " + appConfig.ownerName +
+            "'s personal assistant. No ads, no footers, no promotions. Just me helping.\n\n" +
+            "Talk to me in your own words, or send " + appConfig.prefix + "menu to see everything I can do.";
+          if (ownNumber) {
+            sock.sendMessage(ownNumber + "@s.whatsapp.net", { text: hello }).catch(() => {});
+          }
+        }
       } else if (connection === "close") {
         this.connected = false;
+        // A closed socket invalidates the QR shown on the dashboard — never
+        // let the owner scan a dead one.
+        this.qrString = null;
+        this.qrDataUrl = null;
+        this.qrAt = null;
         const code = Number(
           lastDisconnect?.error?.output?.statusCode ||
           lastDisconnect?.error?.data?.statusCode ||
           0
         );
-        if (this.stopped) return;
+        // The raw message is included because it is how WhatsApp says things
+        // like "rate-limit exceeded" — visible in the pairing log.
+        const raw = String(lastDisconnect?.error?.message || "").slice(0, 60);
+        // 428/515 recycles are normal while pairing — do not scare the owner.
+        this.logPairing(
+          code === DisconnectReason.loggedOut || code === 401
+            ? "session rejected (" + code + ") " + raw
+            : "socket recycled (" + code + ") " + raw
+        );
+        if (this.stopped || this.resetting) return;
         if (code === DisconnectReason.loggedOut || code === 401) {
-          console.error("[" + appConfig.name + "] session logged out. Delete the auth folder and pair again.");
+          // Usually an expired pairing code was used — wipe and re-pair cleanly.
+          this.pairRecoveries = (this.pairRecoveries || 0) + 1;
+          if (this.pairRecoveries <= 5) {
+            console.error("[" + appConfig.name + "] session was rejected (expired code?). Wiping it and issuing a fresh pairing code...");
+            this.logPairing("session rejected — wiped, starting a clean pairing");
+            try { fs.rmSync(path.resolve(appConfig.sessionDirectory), { recursive: true, force: true }); } catch { /* nothing to wipe */ }
+            setTimeout(() => {
+              if (!this.stopped) this.start().catch(error => console.error(error?.message));
+            }, 4000);
+          } else {
+            console.error("[" + appConfig.name + "] too many rejected pairings — auto-pairing paused. The dashboard's 'Start completely over' button restarts it safely.");
+            this.logPairing("auto-pairing paused after repeated rejections — tap Start completely over");
+          }
           return;
         }
         const delay = Math.min(30000, 2000 * (1 + Math.random() * 2));
@@ -304,11 +472,13 @@ export class DamzDBot {
       if (type !== "notify") return;
       for (const msg of messages) {
         try {
+          await runSideEffects(sock, { store: this.store }, msg);
           await processMessage({
             processed: this.processed,
             store: this.store,
             memory: this.memory,
-            lookup: this.lookup
+            lookup: this.lookup,
+            commands: this.commands
           }, sock, msg);
         } catch (error) {
           console.error("[" + appConfig.name + "] message error:", error?.message);
@@ -338,39 +508,155 @@ export class DamzDBot {
       }
     });
 
-    if (!state.creds?.registered) {
-      await this.requestPairing();
-    }
+    this.pairingWasFresh = !state.creds?.registered;
     return sock;
   }
 
-  async requestPairing() {
-    const target = appConfig.ownerNumbers[0] || "";
-    let phoneNumber = target;
-    if (!phoneNumber) {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      const answer = await rl.question("Enter the WhatsApp number to pair (international format): ");
-      rl.close();
-      phoneNumber = numberFromJid(answer);
-    }
-    if (!phoneNumber) {
-      console.error("[" + appConfig.name + "] no phone number available for pairing.");
+  async requestPairing(state, sock, generation) {
+    const fallbackNumber = appConfig.ownerNumbers[0] || "";
+    const target = () => this.pairingTarget || fallbackNumber;
+    if (!target()) {
+      console.error("[" + appConfig.name + "] no OWNER_NUMBER set — type a number in the dashboard's number box to pair that phone.");
       return;
     }
-    await sleep(1500);
+    const alive = () => !this.stopped && !this.connected && !state.creds?.registered && this.pairingGeneration === generation && this.sock === sock;
+    await sleep(1200);
+    if (!alive()) return;
     try {
-      const code = await this.sock.requestPairingCode(phoneNumber);
-      console.log("┌─────────────────────────────┐");
-      console.log("│  Pair this code in WhatsApp │");
-      console.log("│                             │");
-      console.log("│        " + code + "          │");
-      console.log("│                             │");
-      console.log("│  WhatsApp → Linked devices  │");
-      console.log("│  → Link with phone number   │");
-      console.log("└─────────────────────────────┘");
+      await this.issueCode(sock, target());
     } catch (error) {
-      console.error("[" + appConfig.name + "] pairing failed:", error?.message);
+      this.logPairing("code request refused: " + String(error?.message || error).slice(0, 90));
+      console.error("[" + appConfig.name + "] pairing request failed:", error?.message);
+      return; // the QR cycle re-fires shortly and we try again
     }
+    if (!alive()) return;
+    console.log("┌─────────────────────────────┐");
+    console.log("│  Pair this code in WhatsApp │");
+    console.log("│                             │");
+    console.log("│        " + this.pairingCode + "          │");
+    console.log("│                             │");
+    console.log("│  WhatsApp → Linked devices  │");
+    console.log("│  → Link with phone number   │");
+    console.log("└─────────────────────────────┘");
+    // Deliberately NO background re-requests here. The code is valid for about
+    // a minute; when WhatsApp recycles the socket, a fresh QR arrives and the
+    // trigger above issues the next code. A refresh loop used to live here and
+    // it was actively harmful: a re-request fired while the phone was showing
+    // "Logging in…" kills the pending registration, so the phone gives up and
+    // cancels the login. After issuing a code this coroutine simply ends — the
+    // socket is left completely alone so the phone can finish linking.
+  }
+
+  // Dashboard number box: generate a pairing code for ANY phone number the
+  // owner types. Private deploy — and a pairing code is useless to a stranger
+  // without physical access to that phone, so no auth is needed here.
+  async requestPairingForNumber(number) {
+    const digits = String(number || "").replace(/\D/g, "");
+    if (this.connected || this.stopped) return { ok: false, error: "already connected — no pairing needed" };
+    if (digits.length < 8 || digits.length > 15) return { ok: false, error: "type the full number in international format, e.g. 2347087299884" };
+    const now = Date.now();
+    if (now - (this.lastManualPairingAt || 0) < 5000) return { ok: false, error: "one moment — try again in a few seconds" };
+    this.lastManualPairingAt = now;
+    if (this.qrMode) this.setQrMode(false, false); // asking for a code means code mode
+    const sock = this.sock;
+    if (!sock) return { ok: false, error: "still starting up — try again in a few seconds" };
+    // Same number and the current code is still young? Hand it back instead of
+    // requesting again — an extra request could interrupt a login in progress.
+    if (digits === (this.pairingTarget || appConfig.ownerNumbers[0] || "") && this.pairingCode) {
+      const age = Date.now() - (this.pairingCodeAt || 0);
+      if (age < 45000) return { ok: true, code: this.pairingCode, number: digits };
+    }
+    this.pairingTarget = digits;
+    this.logPairing("dashboard asked for a code for +" + digits);
+    try {
+      const code = await this.issueCode(sock, digits);
+      console.log("[" + appConfig.name + "] pairing code for +" + digits + ": " + code);
+      return { ok: true, code, number: digits };
+    } catch (error) {
+      // Unpaired sockets recycle about once a minute; a request landing late
+      // in that window gets "Connection Closed". Cycle the socket now so
+      // WhatsApp issues a fresh QR in seconds — the QR trigger then requests
+      // a code for THIS number automatically (pairingTarget is already set).
+      this.logPairing("socket recycled mid-request — a code for +" + digits + " lands in a few seconds");
+      console.error("[" + appConfig.name + "] manual pairing request failed:", error?.message);
+      try { sock.end(); } catch { /* already closing */ }
+      return {
+        ok: false,
+        pending: true,
+        error: "the socket was recycling — your code will appear in a few seconds, no need to click again"
+      };
+    }
+  }
+
+  // Used by the dashboard's "New code" button: forces an immediate fresh
+  // code on the live pairing socket instead of waiting for the next cycle.
+  async refreshPairingCode() {
+    if (this.connected || this.stopped) return { ok: false, error: "already connected — no pairing needed" };
+    if (this.qrMode) this.setQrMode(false, false);
+    const sock = this.sock;
+    const phoneNumber = this.pairingTarget || appConfig.ownerNumbers[0] || "";
+    if (!sock || !phoneNumber) return { ok: false, error: "no active pairing socket" };
+    // A code younger than 45s is still the best one — re-requesting could
+    // interrupt a login that is mid-flight on the phone. Hand it back instead.
+    if (this.pairingCode && Date.now() - (this.lastPairingIssueAt || 0) < 45000) {
+      return { ok: true, code: this.pairingCode };
+    }
+    try {
+      const code = await this.issueCode(sock, phoneNumber);
+      console.log("[" + appConfig.name + "] manual pairing code refresh: " + code);
+      return { ok: true, code };
+    } catch (error) {
+      this.logPairing("socket recycled mid-refresh — a fresh code lands in a few seconds");
+      try { sock.end(); } catch { /* already closing */ }
+      return { ok: false, pending: true, error: "the socket was recycling — a fresh code appears in a few seconds" };
+    }
+  }
+
+  // Dashboard switch: pause background pairing codes so a QR stays valid
+  // long enough to be scanned. Switching back re-arms the code flow.
+  setQrMode(on, trigger = true) {
+    this.qrMode = !!on;
+    if (this.qrMode) {
+      this.logPairing("QR scan mode on — background codes paused, the QR stays valid");
+      return { ok: true, qrMode: true };
+    }
+    this.logPairing("back to code mode — a fresh code comes with the next QR");
+    if (trigger && !this.connected && !this.stopped && !this.resetting) {
+      // Make the very next QR carry a fresh code immediately.
+      this.lastPairingIssueAt = 0;
+      this.lastManualPairingAt = Date.now();
+      this.pairingGeneration = (this.pairingGeneration || 0) + 1;
+      const generation = this.pairingGeneration;
+      if (this.sock && this.authState) {
+        this.requestPairing(this.authState, this.sock, generation).catch(() => {});
+      }
+    }
+    return { ok: true, qrMode: false };
+  }
+
+  // Nuclear option from the dashboard: wipe the half-registered session that
+  // repeated cancelled logins leave behind, reset the pairing machinery, and
+  // come back with a genuinely fresh QR. This is the way out of the
+  // "auto-pairing paused" lockdown without touching the server.
+  async fullReset() {
+    if (this.resetting) return { ok: false, error: "already resetting — give it a few seconds" };
+    this.resetting = true;
+    this.logPairing("full reset — wiping the session and starting over");
+    this.pairRecoveries = 0;
+    this.pairingCode = null;
+    this.pairingCodeAt = null;
+    this.pairingTarget = null;
+    this.qrString = null;
+    this.qrDataUrl = null;
+    this.qrAt = null;
+    this.qrMode = false;
+    try { fs.rmSync(path.resolve(appConfig.sessionDirectory), { recursive: true, force: true }); } catch { /* nothing to wipe */ }
+    try { this.sock?.end(new Error("manual full reset")); } catch { /* already closed */ }
+    setTimeout(() => {
+      this.resetting = false;
+      if (!this.stopped) this.start().catch(error => console.error(error?.message));
+    }, 3000);
+    return { ok: true };
   }
 
   stop() {

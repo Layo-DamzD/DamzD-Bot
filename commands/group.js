@@ -1,5 +1,7 @@
 import { numberFromJid } from "../src/utils.js";
 import { ANTILINK_ON, WELCOME_ON, GOODBYE_ON } from "../src/store.js";
+import { askAIAboutText } from "../src/ai.js";
+import { activityFor, recentChat } from "../src/cache.js";
 
 async function requireGroup(ctx) {
   if (!ctx.isGroup) throw new Error("this one only works inside a group");
@@ -46,6 +48,21 @@ async function updateParticipants(ctx, action, successText) {
   await ctx.reply(successText + (list.length === 1 ? "" : " (" + list.length + " people)"));
 }
 
+async function groupStory(ctx, style, intro) {
+  const recent = recentChat(ctx.jid, 50);
+  if (recent.length < 4) {
+    throw new Error("I need a bit more conversation to work with — chat for a while first");
+  }
+  const transcript = recent.map(line => (line.name || "+" + numberFromJid(line.sender)) + ": " + line.text).join("\n").slice(0, 3500);
+  await ctx.typing(2500);
+  const answer = await askAIAboutText({
+    prompt: intro + "\n\nGroup transcript:\n" + transcript,
+    ownerName: ctx.config.ownerName,
+    style
+  });
+  await ctx.reply(answer);
+}
+
 export default [
   {
     name: "kick",
@@ -88,11 +105,10 @@ export default [
       await requireAdmin(ctx);
       const note = String(ctx.args || "").trim();
       const participants = meta.participants.map(participant => participant.id);
-      const mentions = participants;
       const lines = participants.map(jid => "@" + numberFromJid(jid));
       await ctx.reply(
         (note ? "*" + note + "*\n\n" : "") + lines.join(" "),
-        { mentions }
+        { mentions: participants }
       );
     }
   },
@@ -103,13 +119,11 @@ export default [
     run: async ctx => {
       const meta = await requireGroup(ctx);
       const admins = (meta.participants || [])
-        .filter(participant => ["admin", "superadmin"].includes(String(participant.admin || "")))
-        .map(participant => "@" + numberFromJid(participant.id));
-      await ctx.reply("The admins here: " + admins.join(" "), {
-        mentions: (meta.participants || [])
-          .filter(participant => ["admin", "superadmin"].includes(String(participant.admin || "")))
-          .map(participant => participant.id)
-      });
+        .filter(participant => ["admin", "superadmin"].includes(String(participant.admin || "")));
+      await ctx.reply(
+        "The admins here: " + admins.map(participant => "@" + numberFromJid(participant.id)).join(" "),
+        { mentions: admins.map(participant => participant.id) }
+      );
     }
   },
   {
@@ -245,6 +259,238 @@ export default [
         "+" + number + " — " + list.length + " warning" + (list.length === 1 ? "" : "s")
       );
       await ctx.reply("Warnings in this group:\n" + lines.join("\n"));
+    }
+  },
+  {
+    name: "link",
+    category: "Group",
+    description: "get the group invite link",
+    run: async ctx => {
+      await requireGroup(ctx);
+      const code = await ctx.sock.groupInviteCode(ctx.jid);
+      await ctx.reply("https://chat.whatsapp.com/" + code);
+    }
+  },
+  {
+    name: "revoke",
+    aliases: ["resetlink"],
+    category: "Group",
+    description: "reset the group invite link (admin)",
+    run: async ctx => {
+      await requireGroup(ctx);
+      await requireAdmin(ctx);
+      await ctx.sock.groupRevokeInvite(ctx.jid);
+      await ctx.reply("The invite link has been reset.");
+    }
+  },
+  {
+    name: "groupname",
+    aliases: ["setname"],
+    category: "Group",
+    description: "change the group name (admin)",
+    run: async ctx => {
+      await requireGroup(ctx);
+      await requireAdmin(ctx);
+      await requireBotAdmin(ctx);
+      const name = String(ctx.args || "").trim();
+      if (!name) throw new Error("give me the new group name");
+      await ctx.sock.groupUpdateSubject(ctx.jid, name.slice(0, 60));
+      await ctx.reply("Group name updated. ✅");
+    }
+  },
+  {
+    name: "groupdesc",
+    aliases: ["setdesc"],
+    category: "Group",
+    description: "change the group description (admin)",
+    run: async ctx => {
+      await requireGroup(ctx);
+      await requireAdmin(ctx);
+      await requireBotAdmin(ctx);
+      const desc = String(ctx.args || "").trim();
+      if (!desc) throw new Error("give me the new description");
+      await ctx.sock.groupUpdateDescription(ctx.jid, desc.slice(0, 500));
+      await ctx.reply("Group description updated. ✅");
+    }
+  },
+  {
+    name: "leave",
+    category: "Group",
+    description: "make me leave this group (admin)",
+    run: async ctx => {
+      await requireGroup(ctx);
+      await requireAdmin(ctx);
+      await ctx.reply("Alright — leaving the group. Take care. 👋");
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      await ctx.sock.groupLeave(ctx.jid);
+    }
+  },
+  {
+    name: "getgcpp",
+    category: "Group",
+    description: "show this group's picture",
+    run: async ctx => {
+      await requireGroup(ctx);
+      try {
+        const url = await ctx.sock.profilePictureUrl(ctx.jid, "image");
+        await ctx.send({ image: { url }, caption: "*" + (await requireGroup(ctx)).subject + "*" });
+      } catch {
+        throw new Error("this group has no picture");
+      }
+    }
+  },
+  {
+    name: "groupjid",
+    category: "Group",
+    description: "get the current group's JID",
+    run: async ctx => {
+      await requireGroup(ctx);
+      const arg = String(ctx.args || "").trim();
+      if (arg && /chat\.whatsapp\.com\//.test(arg)) {
+        const code = arg.split("/").pop();
+        try {
+          const info = await ctx.sock.groupGetInviteInfo(code);
+          await ctx.reply("That invite points to: `" + info?.id + "` (" + (info?.subject || "unknown group") + ")");
+          return;
+        } catch {
+          throw new Error("I could not resolve that invite link");
+        }
+      }
+      await ctx.reply("This group's JID: `" + ctx.jid + "`");
+    }
+  },
+  {
+    name: "onlineusers",
+    category: "Group",
+    description: "members who messaged here recently",
+    run: async ctx => {
+      await requireGroup(ctx);
+      const rows = activityFor(ctx.jid).filter(row => Date.now() - row.last < 3600000).sort((a, b) => b.last - a.last).slice(0, 15);
+      if (!rows.length) throw new Error("nobody has spoken here in the last hour");
+      await ctx.reply(
+        "🟢 Active in the last hour:\n" +
+        rows.map(row => "@" + row.sender + " (" + row.count + " msg)").join("\n"),
+        { mentions: rows.map(row => row.sender + "@s.whatsapp.net") }
+      );
+    }
+  },
+  {
+    name: "top",
+    category: "Group",
+    description: "the three most active members today",
+    run: async ctx => {
+      await requireGroup(ctx);
+      const rows = activityFor(ctx.jid).filter(row => Date.now() - row.last < 86400000).sort((a, b) => b.count - a.count).slice(0, 3);
+      if (!rows.length) throw new Error("no activity recorded here today yet");
+      const medals = ["🥇", "🥈", "🥉"];
+      await ctx.reply(
+        "Top chatters today:\n" +
+        rows.map((row, index) => medals[index] + " @" + row.sender + " — " + row.count + " messages").join("\n"),
+        { mentions: rows.map(row => row.sender + "@s.whatsapp.net") }
+      );
+    }
+  },
+  {
+    name: "ghost",
+    category: "Group",
+    description: "mention the quietest members",
+    run: async ctx => {
+      const meta = await requireGroup(ctx);
+      const active = new Set(activityFor(ctx.jid).filter(row => Date.now() - row.last < 604800000).map(row => row.sender));
+      const quiet = meta.participants
+        .map(participant => numberFromJid(participant.id))
+        .filter(number => number && !active.has(number) && number !== ctx.senderNumber)
+        .slice(0, 5);
+      if (!quiet.length) throw new Error("everyone has been chatting — no ghosts today");
+      await ctx.reply(
+        "👻 Quiet corner squad: " + quiet.map(number => "@" + number).join(" ") +
+        "\nCome out and say something!",
+        { mentions: quiet.map(number => number + "@s.whatsapp.net") }
+      );
+    }
+  },
+  {
+    name: "tldr",
+    aliases: ["summarize", "summary"],
+    category: "Group",
+    description: "summarise the recent discussion",
+    run: async ctx => groupStory(
+      ctx,
+      "Be concise and structured.",
+      "Summarise this group conversation: the main topics, any decisions made, and action items. Keep it under 10 lines."
+    )
+  },
+  {
+    name: "lore",
+    category: "Group",
+    description: "retell recent chat as an epic saga",
+    run: async ctx => groupStory(
+      ctx,
+      "Write with mock-epic flair but keep every detail accurate.",
+      "Retell this group conversation as a short epic fantasy saga. Give members heroic titles based on what they said, but stay recognisable and good-natured. Under 15 lines."
+    )
+  },
+  {
+    name: "roast",
+    category: "Group",
+    description: "a light-hearted roast from recent messages",
+    run: async ctx => {
+      const meta = await requireGroup(ctx);
+      const mentioned = msgMentions(ctx);
+      let targetNumber = "";
+      let targetName = "";
+      if (mentioned.length) {
+        targetNumber = numberFromJid(mentioned[0]);
+      } else {
+        const rows = activityFor(ctx.jid).sort((a, b) => b.count - a.count);
+        targetNumber = rows[0]?.sender || "";
+      }
+      if (!targetNumber) throw new Error("mention the person to roast");
+      const participant = meta.participants.find(entry => numberFromJid(entry.id) === targetNumber);
+      if (!participant) throw new Error("that person is not in this group");
+      const recent = recentChat(ctx.jid, 40).filter(line => numberFromJid(line.sender) === targetNumber);
+      targetName = recent.find(line => line.name)?.name || "+" + targetNumber;
+      const material = (recent.length ? recent.map(line => line.text).join(" | ").slice(0, 1500) : "(has not said much)");
+      await ctx.typing(2000);
+      const roast = await askAIAboutText({
+        prompt: "Write a light-hearted, friendly roast of a group member named " + targetName +
+          ", based on their recent messages. Keep it playful and kind-hearted — no insults about appearance, ethnicity, or anything personal and hurtful. Under 4 sentences.\n\nTheir recent messages: " + material,
+        ownerName: ctx.config.ownerName,
+        style: "You write playful, warm-hearted roasts that everyone laughs with, not at."
+      });
+      await ctx.reply(roast, { mentions: [targetNumber + "@s.whatsapp.net"] });
+    }
+  },
+  {
+    name: "addmeta",
+    aliases: ["addai", "addmetaai"],
+    category: "Group",
+    description: "try to add Meta AI to this group",
+    run: async ctx => {
+      await requireGroup(ctx);
+      await requireAdmin(ctx);
+      try {
+        await ctx.sock.groupParticipantsUpdate(ctx.jid, ["13135550002@s.whatsapp.net"], "add");
+        await ctx.reply("I sent an add request to Meta AI — if WhatsApp allows it in your region, it will appear shortly.");
+      } catch {
+        throw new Error("WhatsApp did not accept the request — Meta AI availability depends on your region and account");
+      }
+    }
+  },
+  {
+    name: "removemeta",
+    aliases: ["removeai", "removemetaai"],
+    category: "Group",
+    description: "remove Meta AI from this group",
+    run: async ctx => {
+      await requireGroup(ctx);
+      await requireAdmin(ctx);
+      try {
+        await ctx.sock.groupParticipantsUpdate(ctx.jid, ["13135550002@s.whatsapp.net"], "remove");
+        await ctx.reply("Done — Meta AI removal requested.");
+      } catch {
+        throw new Error("I could not remove that participant — it may not be Meta AI after all");
+      }
     }
   },
   {
