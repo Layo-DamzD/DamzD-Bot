@@ -99,7 +99,8 @@ await check("menu shows section overview without any promo footer", async () => 
   const text = sent.map(item => item.content.text || "").join("\n");
   assert.match(text, /Here is everything I can do/);
   assert.match(text, /\*News\*/);
-  assert.match(text, /\*Anime\*/);
+  assert.match(text, /\*Fun\*/);
+  assert.ok(!/\*Anime\*/.test(text), "the anime section is gone as requested");
   assert.ok(!/powered by|pairing portal|benfei/i.test(text), "no promotional text allowed");
 });
 
@@ -141,9 +142,9 @@ await check("news command lists its desks", async () => {
   assert.match(text, /punch/i);
 });
 
-await check("anime reaction command list is wired to categories", async () => {
+await check("reaction-style fun commands stay wired after the anime removal", async () => {
   const names = new Set(commands.map(command => command.name));
-  for (const expected of ["hug", "kiss", "slap", "pat", "yeet", "waifu", "8ball"]) {
+  for (const expected of ["8ball", "coinflip", "meme", "dog"]) {
     assert.ok(names.has(expected), "missing command: " + expected);
   }
   const canvasNames = new Set(commands.map(command => command.name));

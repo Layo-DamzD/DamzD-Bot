@@ -112,9 +112,9 @@ async function callPollinations(messages) {
 }
 
 // NABEES free AI Studio models (GPT-5 Luna, DeepSeek) — the owner's one free
-// key (same key that powers video downloads) becomes an extra AI brain when
-// every other service is quiet. Kept last so the daily quota stays for music.
-async function callNabeesAI(chat) {
+// key (same key that powers video downloads) unlocks these two real models.
+// Kept last in the default chain so the daily quota stays for music.
+async function callNabeesModel(chat, endpoint) {
   const apiKey = String(process.env.NABEES_API_KEY || "").trim();
   if (!apiKey) throw new Error("no-key");
   const system = chat.find(message => message.role === "system")?.content || "";
@@ -123,21 +123,26 @@ async function callNabeesAI(chat) {
     .slice(-6)
     .map(message => (message.role === "assistant" ? "You said: " : "They said: ") + String(message.content || "").slice(0, 500));
   const prompt = (String(system).slice(0, 1200) + "\n\nConversation so far:\n" + turns.join("\n")).slice(0, 3500);
+  const response = await fetch(
+    "https://apis.nabeestech.com/api/v1/ai/" + endpoint + "?apikey=" + encodeURIComponent(apiKey),
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ q: prompt }),
+      signal: AbortSignal.timeout(90000)
+    }
+  );
+  if (!response.ok) throw new Error("the NABEES studio refused that request.");
+  const payload = await response.json().catch(() => null);
+  const text = String(payload?.response || "").trim();
+  if (!text) throw new Error("the NABEES studio had nothing to say.");
+  return stripThinking(text);
+}
+
+async function callNabeesAI(chat) {
   for (const endpoint of ["gpt5-luna", "deepseek-v4-flash"]) {
     try {
-      const response = await fetch(
-        "https://apis.nabeestech.com/api/v1/ai/" + endpoint + "?apikey=" + encodeURIComponent(apiKey),
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ q: prompt }),
-          signal: AbortSignal.timeout(90000)
-        }
-      );
-      if (!response.ok) continue;
-      const payload = await response.json().catch(() => null);
-      const text = String(payload?.response || "").trim();
-      if (text) return stripThinking(text);
+      return await callNabeesModel(chat, endpoint);
     } catch {
       continue;
     }
@@ -145,11 +150,70 @@ async function callNabeesAI(chat) {
   throw new Error("the backup AI services had nothing to say. Try again in a moment.");
 }
 
-export async function askAI({ messages, ownerName, style } = {}) {
+// Named brains for the per-model commands (.chatgpt, .llama, .luna, .deepseek).
+// Each one is a REAL model behind a free service — not a persona wearing a
+// name. When a brain is unavailable (no key yet, sleeping service) askAI
+// quietly continues down the standard chain, so a command never dead-ends.
+const BRAINS = {
+  groq: async chat => {
+    if (!config.groq.apiKey) throw new Error("no-key");
+    return callOpenAICompatible({
+      url: config.groq.url,
+      apiKey: config.groq.apiKey,
+      model: config.groq.model,
+      messages: chat,
+      label: "AI service"
+    });
+  },
+  openrouter: async chat => {
+    if (!config.openrouter.apiKey) throw new Error("no-key");
+    return callOpenAICompatible({
+      url: config.openrouter.url,
+      apiKey: config.openrouter.apiKey,
+      model: config.openrouter.model,
+      messages: chat,
+      label: "backup AI service",
+      extraHeaders: {
+        "HTTP-Referer": "https://damzd.local",
+        "X-Title": config.name
+      }
+    });
+  },
+  pollinations: chat => callPollinations(chat),
+  "nabees-luna": chat => callNabeesModel(chat, "gpt5-luna"),
+  "nabees-deepseek": chat => callNabeesModel(chat, "deepseek-v4-flash")
+};
+
+export async function askAI({ messages, ownerName, style, brains } = {}) {
   const chat = [
     { role: "system", content: systemPrompt({ ownerName, style }) },
     ...(Array.isArray(messages) ? messages.slice(-18) : [])
   ];
+  // Per-model requests: try the named brains first, in order.
+  if (Array.isArray(brains) && brains.length) {
+    for (const brain of brains) {
+      try {
+        if (typeof brain === "string" && brain.startsWith("openrouter:")) {
+          if (!config.openrouter.apiKey) throw new Error("no-key");
+          return await callOpenAICompatible({
+            url: config.openrouter.url,
+            apiKey: config.openrouter.apiKey,
+            model: brain.slice("openrouter:".length),
+            messages: chat,
+            label: "backup AI service",
+            extraHeaders: {
+              "HTTP-Referer": "https://damzd.local",
+              "X-Title": config.name
+            }
+          });
+        }
+        const run = BRAINS[brain];
+        if (run) return await run(chat);
+      } catch {
+        continue; // that brain is asleep or keyless — the standard chain answers
+      }
+    }
+  }
   const failures = [];
   if (config.groq.apiKey) {
     try {
@@ -195,10 +259,10 @@ export async function askAI({ messages, ownerName, style } = {}) {
   }
 }
 
-export async function askAIAboutText({ prompt, history = [], ownerName, style } = {}) {
+export async function askAIAboutText({ prompt, history = [], ownerName, style, brains } = {}) {
   const messages = [
     ...history,
     { role: "user", content: String(prompt || "").slice(0, 3500) }
   ];
-  return askAI({ messages, ownerName, style });
+  return askAI({ messages, ownerName, style, brains });
 }

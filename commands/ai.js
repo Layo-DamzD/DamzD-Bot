@@ -1,7 +1,7 @@
 import { askAIAboutText } from "../src/ai.js";
 import { translateText, resolveLanguageCode } from "../src/apis.js";
 
-async function askStyled(ctx, style) {
+async function askStyled(ctx, style, brains) {
   const prompt = String(ctx.args || "").trim();
   if (!prompt) {
     throw new Error("tell me what you would like to know");
@@ -18,7 +18,8 @@ async function askStyled(ctx, style) {
     prompt,
     history,
     ownerName: ctx.config.ownerName,
-    style
+    style,
+    brains
   });
   await ctx.reply(answer);
   ctx.memory.remember(ctx.jid, "user", prompt);
@@ -35,6 +36,20 @@ function styleCommand(name, aliases, description, style) {
   };
 }
 
+// A REAL model command: the question goes to that specific brain — a genuine
+// model behind a free service — not a persona wearing a famous name. If that
+// brain is asleep or its key is missing, the standard chain answers instead,
+// so the command never dead-ends.
+function modelCommand(name, aliases, description, brains) {
+  return {
+    name,
+    aliases,
+    category: "AI & Chat",
+    description,
+    run: async ctx => askStyled(ctx, "", brains)
+  };
+}
+
 export default [
   {
     name: "ai",
@@ -43,15 +58,21 @@ export default [
     description: "ask me anything directly",
     run: async ctx => askStyled(ctx, "")
   },
-  styleCommand("gpt", ["chatgpt"], "answers in a clear, structured way",
-    "Answer like a knowledgeable general-purpose model: clear, structured, concise."),
-  styleCommand("claude", [], "answers with thoughtful nuance",
+  modelCommand("chatgpt", ["gpt"],
+    "the open GPT model (GPT-OSS) — real, free, no key needed", ["pollinations"]),
+  modelCommand("llama", ["groq"],
+    "the real Llama 3.3 70B, running on Groq", ["groq"]),
+  modelCommand("luna", ["gpt5"],
+    "GPT-5 Luna from the NABEES studio (shares your daily NABEES quota)", ["nabees-luna"]),
+  modelCommand("deepseek", ["deepseek2", "deepseek3"],
+    "DeepSeek V4 Flash from the NABEES studio (shares your daily NABEES quota)", ["nabees-deepseek"]),
+  styleCommand("claude", [], "answers in Claude's careful, nuanced style (my built-in brains — no free Claude server exists)",
     "Answer like a thoughtful reasoning model: careful, nuanced, balanced."),
-  styleCommand("gemini", ["gemini2"], "answers with extra creativity",
+  styleCommand("gemini", ["gemini2"], "answers with extra creativity, Gemini-style (my built-in brains)",
     "Answer like a creative model: imaginative, vivid, open to playful angles."),
-  styleCommand("deepseek", ["deepseek2", "deepseek3"], "answers with technical precision",
-    "Answer like a technical model: precise, structured, detail-oriented."),
-  styleCommand("qwen", [], "answers with multilingual strength",
+  styleCommand("grok", [], "witty, bold answers, Grok-style (my built-in brains)",
+    "Answer with wit and confidence: bold, playful, a little cheeky — but accurate, helpful and safe."),
+  styleCommand("qwen", [], "strong multilingual answers, Qwen-style (my built-in brains)",
     "Answer like a multilingual model: strong across languages, precise translations and phrasing."),
   styleCommand("fable5", [], "answers like a storyteller",
     "Answer like a storyteller: warm narrative tone, light metaphor, but still accurate."),

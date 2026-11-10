@@ -74,7 +74,7 @@ Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_K
 `.menu` shows live sections; `.menu news` opens a section. `.help` (or `.commands`) prints **every command with what it does**; `.help song` explains one command. Highlights:
 
 - **🤖 General** — menu, ping, alive, owner card (.vcf), time/date, jid, version
-- **💬 AI & Chat** — `.ai` plus styled brains: `.gpt`, `.claude`, `.gemini`, `.deepseek`, `.qwen`, `.fable5`, `.wormgpt`, `.mathgpt`, `.aidetect`, `.translate`
+- **💬 AI & Chat** — `.ai` plus **real per-model brains**: `.chatgpt` (open GPT-OSS, keyless), `.llama` (real Llama 3.3 70B on Groq), `.luna` (GPT-5 Luna) and `.deepseek` (DeepSeek V4 Flash) via the NABEES studio — plus styled companions `.claude`, `.gemini`, `.grok`, `.qwen`, `.fable5`, `.wormgpt`, `.mathgpt`, `.aidetect`, `.translate`. Real brains are labelled real; styles are labelled styles — never passed off as models they are not
 - **🎨 AI Media** — `.flux` image generation, `.tts` voice notes, `.vn2text` transcription, `.ssweb` screenshots
 - **📰 News** — BBC, CNN, Al Jazeera, Guardian, Punch Nigeria and 9 more desks
 - **📥 Downloads** — `.song`/`.play` send **full songs** (real-artist verification: the engine identifies the official recording via Apple's catalogue, pulls the verified track from JioSaavn at up to 320kbps, and never passes a cover off as the song — for tracks the library lacks it routes to YouTube, and as a last resort sends the official 30-second preview), TikTok, Instagram, Facebook, X/Twitter, YouTube (video + audio via the optional key below), Spotify previews, `.ytsearch`
@@ -82,7 +82,6 @@ Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_K
 - **🎮 Games** — trivia, riddles, 8ball, dice, polls, calculator, multiplayer Word Chain (`.wcg`)
 - **🎉 Fun** — jokes (dad, Chuck Norris, programming), facts, animals, memes, quotes, history
 - **👥 Group** — kick/add/promote, tagall, welcome/goodbye, antilink with 3-strike warnings, `.tldr`, `.lore`, `.roast`, `.top`, `.ghost`, invite links. **Group stats are honest**: member numbers are resolved to real phone numbers (never WhatsApp privacy-LID digits), activity is tracked on disk so restarts don't wipe it, `.ghost` tells you exactly how long it has been watching and refuses to judge before it has enough chat history, and the bot itself never appears in its own lists
-- **💞 Anime** — 39 reaction GIF commands (hug, kiss, pat, yeet…)
 - **🖼 Canvas** — fake chat screenshots, iPhone/Windows quotes, Nokia messages, memes, Free Fire cards, payment receipts
 - **🛠 Tools** — `.sticker`, `.vv` **silent** view-once recovery (media lands in your own "Message yourself" chat — no reply, no reaction, no trace in the original chat), `.save`, TikTok stalk, lyrics, Bible, wiki, NASA, Pokémon, URL shortener
 - **🔒 Privacy** — anti-delete/anti-edit alerts, pin/archive/mute/star chats, disappearing messages, block/unblock, message edit/unsend/forward
