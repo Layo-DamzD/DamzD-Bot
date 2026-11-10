@@ -12,7 +12,16 @@ export function createContext({ sock, msg, config, store, memory }) {
       : jid;
   const senderNumber = numberFromJid(sender);
   const ownNumber = numberFromJid(sock?.user?.id || "");
-  const isOwner = isOwnerNumber(senderNumber) || (ownNumber && senderNumber === ownNumber) || Boolean(key.fromMe && !isGroup);
+  // WhatsApp increasingly identifies people (including group senders) by a
+  // privacy LID instead of the phone number — the owner must be recognized in
+  // both forms or the bot goes quiet in groups. The bot itself runs as a
+  // linked device on the owner's account, so everything the account sends is
+  // the owner speaking, in DMs and groups alike.
+  const ownLid = numberFromJid(sock?.user?.lid || "");
+  const isOwner = Boolean(key.fromMe) ||
+    isOwnerNumber(senderNumber) ||
+    (ownNumber && senderNumber === ownNumber) ||
+    (ownLid && senderNumber === ownLid);
 
   let usedTyping = false;
 

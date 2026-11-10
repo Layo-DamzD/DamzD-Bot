@@ -86,7 +86,7 @@ function allowedSender(ctx) {
   return true;
 }
 
-function isBotMention(ctx, msg) {
+export function isBotMention(ctx, msg) { // exported so tests can cover the mention forms
   const ownJid = ctx.sock?.user?.id;
   const ownLid = ctx.sock?.user?.lid;
   const mentions = mentionedJids(msg.message);
@@ -105,7 +105,7 @@ function formatAIError(error) {
   return "Sorry, my mind went blank for a second — " + message.charAt(0).toLowerCase() + message.slice(1);
 }
 
-async function sendAIReply(ctx, userText) {
+async function sendAIReply(ctx, userText, { silentOnCooldown = false } = {}) {
   if (!hasAIBrain()) {
     await ctx.reply(
       "I can chat properly once my owner adds an AI key to my settings. " +
@@ -114,7 +114,8 @@ async function sendAIReply(ctx, userText) {
     return;
   }
   if (!canUseAI(ctx.jid)) {
-    await ctx.reply("Give me a second to catch up first. 😊");
+    // In groups a cooldown nudge would be noise — stay quiet there.
+    if (!silentOnCooldown) await ctx.reply("Give me a second to catch up first. 😊");
     return;
   }
   markAIUsed(ctx.jid);
@@ -234,6 +235,7 @@ export async function processMessage(deps, sock, msg) {
     if (command) {
       ctx.commandName = command.name;
       ctx.args = parsed.args;
+      await ctx.react("⚡"); // quick visible ack that the command was received
       try {
         await command.run(ctx);
       } catch (error) {
@@ -258,17 +260,20 @@ export async function processMessage(deps, sock, msg) {
   }
 
   if (ctx.isGroup) {
-    if (isBotMention(ctx, msg)) {
+    // The owner's own links are fetched even when she would not chat here.
+    if (ctx.isOwner && matchLink(text)) {
+      const handled = await handleLink(ctx, text);
+      if (handled) return;
+    }
+    // She answers when mentioned — and in self mode the owner never needs to
+    // mention her at all: anything he writes in a group is for her too.
+    if (isBotMention(ctx, msg) || ctx.isOwner) {
       const cleaned = text.replace(/@\S+/g, " ").replace(appConfig.prefix + "\\S+", "").trim() || "Hello!";
       const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
       const quotedContent = quoted ? messageText(quoted) : "";
       const composed = quotedContent ? quotedContent + "\n\n" + cleaned : cleaned;
-      await sendAIReply(ctx, composed.slice(0, 3000));
+      await sendAIReply(ctx, composed.slice(0, 3000), { silentOnCooldown: true });
       return;
-    }
-
-    if (ctx.isOwner && matchLink(text)) {
-      await handleLink(ctx, text);
     }
   }
 }
@@ -385,6 +390,18 @@ export class DamzDBot {
     });
     this.sock = sock;
     this.authState = state;
+
+    // The bot is a linked device on the owner's own account, so WhatsApp
+    // re-delivers every message the account sends — including this bot's own
+    // replies. Register everything we send as already-processed so an AI
+    // reply can never trigger another reply (self-loop protection).
+    const rawSend = sock.sendMessage.bind(sock);
+    sock.sendMessage = async (jid, content, options) => {
+      const sent = await rawSend(jid, content, options);
+      const sentId = String(sent?.key?.id || "");
+      if (sentId) this.processed.add(sentId);
+      return sent;
+    };
 
     sock.ev.on("creds.update", saveCreds);
     registerCallHook(sock, this.store);

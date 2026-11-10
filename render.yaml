@@ -32,3 +32,7 @@ services:
         value: "true"
       - key: LOG_LEVEL
         value: warn
+      # Optional: free key from apis.nabeestech.com restores .aio/.yt video
+      # downloads. Songs via .song work without it (JioSaavn engine).
+      - key: NABEES_API_KEY
+        sync: false

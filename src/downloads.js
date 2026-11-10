@@ -98,7 +98,10 @@ export function cleanTitle(value, fallback = "download") {
 }
 
 export async function resolveAllInOne(sourceUrl) {
-  const url = AIO_API + "?url=" + encodeURIComponent(sourceUrl);
+  // The provider introduced API keys — attach the owner's free key when it is
+  // configured so downloads keep working; without it most providers now fail.
+  const key = String(process.env.NABEES_API_KEY || "").trim();
+  const url = AIO_API + "?url=" + encodeURIComponent(sourceUrl) + (key ? "&apikey=" + encodeURIComponent(key) : "");
   const payload = await fetchJson(url, { timeoutMs: 90000, label: "download provider" });
   const data = payload?.data?.data || payload?.data || payload?.result || payload || {};
   const selected = chooseMedia(data);

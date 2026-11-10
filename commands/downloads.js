@@ -8,8 +8,6 @@ import {
   cleanTitle,
   PLATFORM_HOSTS
 } from "../src/downloads.js";
-import { fetchBuffer } from "../src/apis.js";
-import { videoToMp3 } from "../src/mediautil.js";
 
 async function deliver(ctx, resolved) {
   const info = mediaKind(resolved.item, resolved.url);
@@ -37,6 +35,27 @@ async function viaAio(ctx, label) {
   await ctx.typing(1000);
   const resolved = await resolveAllInOne(url);
   await deliver(ctx, resolved);
+}
+
+// Shared song pipeline: JioSaavn first (full tracks, no YouTube involved,
+// works from Render), then the legacy YouTube play service. Always sends the
+// audio itself, never just a link.
+async function sendSong(ctx, query) {
+  const { downloadSong } = await import("../src/saavn.js");
+  try {
+    const song = await downloadSong(query);
+    await ctx.typing(800);
+    const name = song.artist ? song.artist + " - " + song.title : song.title;
+    await ctx.send({ audio: song.buffer, mimetype: "audio/mp4", fileName: cleanTitle(name) + ".m4a", ptt: false });
+  } catch {
+    const result = await searchYouTubeAudio(query);
+    await ctx.send({
+      audio: { url: result.url },
+      mimetype: "audio/mpeg",
+      fileName: cleanTitle(result.title) + ".mp3",
+      ptt: false
+    });
+  }
 }
 
 export default [
@@ -118,7 +137,18 @@ export default [
     run: async ctx => {
       const url = requirePlatformUrl(ctx.args, "YouTube", PLATFORM_HOSTS.youtube);
       await ctx.typing(1000);
-      const resolved = await resolveYouTubeVideo(url);
+      let resolved;
+      try {
+        resolved = await resolveYouTubeVideo(url);
+      } catch (error) {
+        if (String(process.env.NABEES_API_KEY || "").trim()) {
+          resolved = await resolveAllInOne(url);
+        } else {
+          throw new Error(
+            "my free YouTube route is being refused right now — add a free NABEES_API_KEY (apis.nabeestech.com) to my settings to restore video downloads"
+          );
+        }
+      }
       await deliver(ctx, resolved);
     }
   },
@@ -126,18 +156,12 @@ export default [
     name: "song",
     aliases: ["play", "music"],
     category: "Downloads",
-    description: "search YouTube and send the audio",
+    description: "send any song as a full audio file",
     run: async ctx => {
       const query = String(ctx.args || "").trim();
       if (!query) throw new Error("tell me the song or artist name");
       await ctx.typing(1200);
-      const result = await searchYouTubeAudio(query);
-      await ctx.send({
-        audio: { url: result.url },
-        mimetype: "audio/mpeg",
-        fileName: cleanTitle(result.title) + ".mp3",
-        ptt: false
-      });
+      await sendSong(ctx, query);
     }
   },
   {
@@ -148,13 +172,7 @@ export default [
       const query = String(ctx.args || "").trim();
       if (!query) throw new Error("tell me the song or artist name");
       await ctx.typing(1500);
-      const videos = await searchYouTube(query);
-      const first = videos.find(item => item.url) || videos[0];
-      if (!first?.url) throw new Error("nothing turned up for that search");
-      const resolved = await resolveYouTubeVideo(first.url);
-      const buffer = await fetchBuffer(resolved.url, { timeoutMs: 150000, label: "YouTube service" });
-      const mp3 = await videoToMp3(buffer);
-      await ctx.send({ audio: mp3, mimetype: "audio/mpeg", fileName: cleanTitle(resolved.title) + ".mp3", ptt: false });
+      await sendSong(ctx, query);
     }
   },
   {

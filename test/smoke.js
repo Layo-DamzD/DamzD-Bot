@@ -75,6 +75,7 @@ function textMessage(text, overrides = {}) {
 }
 
 const deps = { processed: new Set(), store, memory, lookup, commands };
+const firstText = () => sent.map(item => item.content?.text || "").find(Boolean) || "";
 let passed = 0;
 async function check(label, fn) {
   await fn();
@@ -84,11 +85,12 @@ async function check(label, fn) {
 
 console.log("DamzD smoke test (" + commands.length + " commands loaded)");
 
-await check("ping command replies with uptime", async () => {
+await check("ping command reacts ⚡ then replies with uptime", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".ping"));
-  assert.ok(sent.length >= 1);
-  assert.match(sent[0].content.text, /here and running/);
+  assert.ok(sent.some(item => item.content?.react?.text === "⚡"), "command should get a ⚡ reaction");
+  const reply = sent.map(item => item.content.text || "").find(Boolean) || "";
+  assert.match(reply, /here and running/);
 });
 
 await check("menu shows section overview without any promo footer", async () => {
@@ -153,7 +155,7 @@ await check("anime reaction command list is wired to categories", async () => {
 await check("unknown command in DM gets a gentle suggestion", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".frobnicate"));
-  assert.match(sent[0].content.text, /do not know that command/);
+  assert.match(firstText(), /do not know that command/);
 });
 
 await check("plain DM text goes to the AI brain with memory", async () => {
@@ -224,12 +226,23 @@ await check("group mention wakes the AI", async () => {
   assert.match(sent.at(-1).content.text, /Good evening/);
 });
 
-await check("group message without mention stays quiet", async () => {
+await check("owner's plain group message wakes the AI without a mention", async () => {
   sent.length = 0;
   groqCalls.length = 0;
   await new Promise(resolve => setTimeout(resolve, 2600));
   await processMessage(deps, ownerSock, textMessage("anyone watching the match?", { jid: "123@g.us" }));
-  assert.equal(groqCalls.length, 0, "must not chat uninvited in groups");
+  assert.ok(groqCalls.length === 1, "owner never needs to mention her in groups");
+  assert.match(sent.at(-1).content.text, /Good evening/);
+});
+
+await check("non-owner group message without mention stays quiet", async () => {
+  sent.length = 0;
+  groqCalls.length = 0;
+  const bystander = textMessage("anyone watching the match?", { jid: "123@g.us", fromMe: false });
+  bystander.key.participant = "2348555000009@s.whatsapp.net";
+  await processMessage(deps, nonOwnerSock, bystander);
+  assert.equal(groqCalls.length, 0, "only the owner can wake her in self mode");
+  assert.equal(sent.length, 0);
 });
 
 await check("antilink removes member links and warns", async () => {
@@ -271,19 +284,19 @@ await check("trivia round asks then accepts the right answer", async () => {
 await check("coinflip and dice always answer cleanly", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".coinflip"));
-  assert.match(sent[0].content.text, /Heads|Tails/);
+  assert.match(firstText(), /Heads|Tails/);
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".dice"));
-  assert.match(sent[0].content.text, /rolled a \*[1-6]\*/);
+  assert.match(firstText(), /rolled a \*[1-6]\*/);
 });
 
 await check("calc handles arithmetic safely", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".calc (12+8)*3"));
-  assert.match(sent[0].content.text, /= \*60\*/);
+  assert.match(firstText(), /= \*60\*/);
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".calc process.exit(1)"));
-  assert.match(sent[0].content.text, /did not work/);
+  assert.match(firstText(), /did not work/);
 });
 
 await check("no reply text ever contains promotional content", async () => {
