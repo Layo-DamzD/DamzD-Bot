@@ -150,11 +150,52 @@ async function callNabeesAI(chat) {
   throw new Error("the backup AI services had nothing to say. Try again in a moment.");
 }
 
+// Puter — the owner's free Puter account (PUTER_AUTH_TOKEN) unlocks the REAL
+// flagship models: Claude, GPT and Gemini, through puter.ai.chat. The SDK is
+// imported lazily so the bot still boots fine before the package or token
+// exists — that brain simply sleeps and the standard chain answers instead.
+let puterClient = null;
+async function getPuter() {
+  const token = String(process.env.PUTER_AUTH_TOKEN || "").trim();
+  if (!token) throw new Error("no-key");
+  if (!puterClient) {
+    const { init } = await import("@heyputer/puter.js/src/init.cjs");
+    puterClient = init(token);
+  }
+  return puterClient;
+}
+
+function puterText(result) {
+  const content = result?.message?.content ?? result?.toString?.() ?? result;
+  if (Array.isArray(content)) {
+    return content
+      .map(part => (typeof part === "string" ? part : part?.text || ""))
+      .join("")
+      .trim();
+  }
+  return String(content || "").trim();
+}
+
+async function callPuterModel(chat, model) {
+  const puter = await getPuter();
+  const answer = await Promise.race([
+    puter.ai.chat(chat, { model }),
+    new Promise((_resolve, reject) =>
+      setTimeout(() => reject(new Error("the Puter model took too long")), 90000))
+  ]);
+  const text = puterText(answer);
+  if (!text) throw new Error("the Puter model had nothing to say.");
+  return stripThinking(text);
+}
+
 // Named brains for the per-model commands (.chatgpt, .llama, .luna, .deepseek).
 // Each one is a REAL model behind a free service — not a persona wearing a
 // name. When a brain is unavailable (no key yet, sleeping service) askAI
 // quietly continues down the standard chain, so a command never dead-ends.
 const BRAINS = {
+  "puter-claude": chat => callPuterModel(chat, "claude-sonnet-4-6"),
+  "puter-gpt": chat => callPuterModel(chat, "gpt-5.4-nano"),
+  "puter-gemini": chat => callPuterModel(chat, "gemini-3.1-flash-lite"),
   groq: async chat => {
     if (!config.groq.apiKey) throw new Error("no-key");
     return callOpenAICompatible({

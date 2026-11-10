@@ -36,3 +36,9 @@ services:
       # downloads. Songs via .song work without it (JioSaavn engine).
       - key: NABEES_API_KEY
         sync: false
+      # Optional: the owner's free Puter account token unlocks the REAL
+      # flagship brains — .claude (Claude Sonnet), .chatgpt (GPT) and
+      # .gemini (Gemini) — through puter.ai.chat. Without it those commands
+      # fall back to the built-in chain automatically.
+      - key: PUTER_AUTH_TOKEN
+        sync: false

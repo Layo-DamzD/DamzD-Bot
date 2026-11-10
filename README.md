@@ -67,14 +67,14 @@ Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_K
 
 ## Optional keys
 
-`.song` works out of the box. `NABEES_API_KEY` (free — sign up at [apis.nabeestech.com](https://apis.nabeestech.com), or use the public free key `nabeestech`, ~100 requests/day) adds: real YouTube copies of songs the music library only has covers of, YouTube/TikTok/Instagram **video** downloads, and the backup AI models. `.removebg` optionally takes `PHOTOROOM_API_KEY`. Without any keys every other command still works — the bot says so plainly instead of failing silently.
+`.song` works out of the box. `NABEES_API_KEY` (free — sign up at [apis.nabeestech.com](https://apis.nabeestech.com), or use the public free key `nabeestech`, ~100 requests/day) adds: real YouTube copies of songs the music library only has covers of, YouTube/TikTok/Instagram **video** downloads, and the backup AI models. `PUTER_AUTH_TOKEN` (free token from your Puter account) unlocks the **real flagship brains** — `.claude` becomes actual Claude Sonnet, `.chatgpt` actual GPT, `.gemini` actual Gemini — with automatic fallback to the built-in chain when it's absent. `.removebg` optionally takes `PHOTOROOM_API_KEY`. Without any keys every other command still works — the bot says so plainly instead of failing silently.
 
 ## What DamzD can do
 
 `.menu` shows live sections; `.menu news` opens a section. `.help` (or `.commands`) prints **every command with what it does**; `.help song` explains one command. Highlights:
 
 - **🤖 General** — menu, ping, alive, owner card (.vcf), time/date, jid, version
-- **💬 AI & Chat** — `.ai` plus **real per-model brains**: `.chatgpt` (open GPT-OSS, keyless), `.llama` (real Llama 3.3 70B on Groq), `.luna` (GPT-5 Luna) and `.deepseek` (DeepSeek V4 Flash) via the NABEES studio — plus styled companions `.claude`, `.gemini`, `.grok`, `.qwen`, `.fable5`, `.wormgpt`, `.mathgpt`, `.aidetect`, `.translate`. Real brains are labelled real; styles are labelled styles — never passed off as models they are not
+- **💬 AI & Chat** — `.ai` plus **real per-model brains**: `.chatgpt` (real GPT via Puter key, else open GPT-OSS), `.llama` (real Llama 3.3 70B on Groq), `.luna` (GPT-5 Luna) and `.deepseek` (DeepSeek V4 Flash) via the NABEES studio, `.claude` (real Claude Sonnet via Puter key) and `.gemini` (real Gemini via Puter key) — plus styled companions `.grok`, `.qwen`, `.fable5`, `.wormgpt`, `.mathgpt`, `.aidetect`, `.translate`. Real brains are labelled real; styles are labelled styles — never passed off as models they are not
 - **🎨 AI Media** — `.flux` image generation, `.tts` voice notes, `.vn2text` transcription, `.ssweb` screenshots
 - **📰 News** — BBC, CNN, Al Jazeera, Guardian, Punch Nigeria and 9 more desks
 - **📥 Downloads** — `.song`/`.play` send **full songs** (real-artist verification: the engine identifies the official recording via Apple's catalogue, pulls the verified track from JioSaavn at up to 320kbps, and never passes a cover off as the song — for tracks the library lacks it routes to YouTube, and as a last resort sends the official 30-second preview), TikTok, Instagram, Facebook, X/Twitter, YouTube (video + audio via the optional key below), Spotify previews, `.ytsearch`

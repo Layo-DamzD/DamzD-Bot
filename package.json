@@ -1,6 +1,6 @@
 {
   "name": "damzd-bot",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "private": true,
   "description": "DamzD — a personal WhatsApp assistant that chats like a human and runs clean commands. No footers, no ads, no spam.",
   "type": "module",
@@ -14,6 +14,7 @@
     "node": ">=20.9.0"
   },
   "dependencies": {
+    "@heyputer/puter.js": "^2.6.5",
     "@napi-rs/canvas": "^0.1.55",
     "baileys": "github:doryani-ai/Baileys#fix/companion-reg-refresh",
     "crypto-js": "^4.2.0",

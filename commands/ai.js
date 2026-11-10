@@ -38,15 +38,15 @@ function styleCommand(name, aliases, description, style) {
 
 // A REAL model command: the question goes to that specific brain — a genuine
 // model behind a free service — not a persona wearing a famous name. If that
-// brain is asleep or its key is missing, the standard chain answers instead,
-// so the command never dead-ends.
-function modelCommand(name, aliases, description, brains) {
+// brain is asleep or its key is missing, the standard chain answers instead
+// (optionally in that model's style), so the command never dead-ends.
+function modelCommand(name, aliases, description, brains, fallbackStyle) {
   return {
     name,
     aliases,
     category: "AI & Chat",
     description,
-    run: async ctx => askStyled(ctx, "", brains)
+    run: async ctx => askStyled(ctx, fallbackStyle || "", brains)
   };
 }
 
@@ -59,16 +59,18 @@ export default [
     run: async ctx => askStyled(ctx, "")
   },
   modelCommand("chatgpt", ["gpt"],
-    "the open GPT model (GPT-OSS) — real, free, no key needed", ["pollinations"]),
+    "GPT — the real one via your Puter key, otherwise the open GPT-OSS brain", ["puter-gpt", "pollinations"]),
   modelCommand("llama", ["groq"],
     "the real Llama 3.3 70B, running on Groq", ["groq"]),
   modelCommand("luna", ["gpt5"],
     "GPT-5 Luna from the NABEES studio (shares your daily NABEES quota)", ["nabees-luna"]),
   modelCommand("deepseek", ["deepseek2", "deepseek3"],
     "DeepSeek V4 Flash from the NABEES studio (shares your daily NABEES quota)", ["nabees-deepseek"]),
-  styleCommand("claude", [], "answers in Claude's careful, nuanced style (my built-in brains — no free Claude server exists)",
+  modelCommand("claude", [],
+    "REAL Claude (Sonnet) when your Puter key is set — otherwise my built-in brains in Claude's careful style", ["puter-claude"],
     "Answer like a thoughtful reasoning model: careful, nuanced, balanced."),
-  styleCommand("gemini", ["gemini2"], "answers with extra creativity, Gemini-style (my built-in brains)",
+  modelCommand("gemini", ["gemini2"],
+    "REAL Gemini when your Puter key is set — otherwise my built-in brains with extra creativity", ["puter-gemini"],
     "Answer like a creative model: imaginative, vivid, open to playful angles."),
   styleCommand("grok", [], "witty, bold answers, Grok-style (my built-in brains)",
     "Answer with wit and confidence: bold, playful, a little cheeky — but accurate, helpful and safe."),
