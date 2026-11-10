@@ -154,3 +154,53 @@ export async function searchYouTubeAudio(query) {
     title: cleanTitle(result?.title || result?.name || query, "song")
   };
 }
+
+const NABEES_API = "https://apis.nabeestech.com/api/v1";
+
+// NABEES free tier (key "nabeestech", ~100 requests/day) can search YouTube
+// and convert a video to MP3 — the rescue path for tracks the song library
+// only offers as covers. Kept behind NABEES_API_KEY so the daily quota is
+// never spent by accident.
+export async function searchYouTubeNabees(query) {
+  const key = String(process.env.NABEES_API_KEY || "").trim();
+  if (!key) throw new Error("no-key");
+  const payload = await fetchJson(
+    NABEES_API + "/search/youtube?apikey=" + encodeURIComponent(key) +
+    "&q=" + encodeURIComponent(String(query || "").slice(0, 200)),
+    { timeoutMs: 45000, label: "YouTube search" }
+  );
+  const videos = Array.isArray(payload?.results) ? payload.results : [];
+  const hit = videos.find(video => video && (safeMediaUrl(video.url, "video") || video.id));
+  if (!hit) throw new Error("YouTube search found nothing usable for that song");
+  return {
+    url: safeMediaUrl(hit.url, "video") || "https://youtu.be/" + hit.id,
+    title: cleanTitle(hit.title || query, "song"),
+    channel: cleanTitle(hit.channel || "", "").slice(0, 60)
+  };
+}
+
+export async function resolveYouTubeAudioNabees(videoUrl) {
+  const key = String(process.env.NABEES_API_KEY || "").trim();
+  if (!key) throw new Error("no-key");
+  const query = "apikey=" + encodeURIComponent(key) + "&url=" + encodeURIComponent(videoUrl);
+  const endpoints = ["/download/youtube-mp3", "/download/youtube", "/download/youtube-v2"];
+  let lastError = new Error("the YouTube music service refused that request");
+  for (const endpoint of endpoints) {
+    try {
+      const payload = await fetchJson(NABEES_API + endpoint + "?" + query, {
+        timeoutMs: 120000,
+        label: "music service"
+      });
+      const data = payload?.data || payload?.result || payload || {};
+      const url = safeMediaUrl(
+        data.downloadUrl || data.audio?.url || data.audioUrl || data.url || data.download,
+        "audio"
+      );
+      if (url) return { url, title: cleanTitle(data.title || "song", "song") };
+      lastError = new Error(payload?.error || payload?.message || "no audio link came back");
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}

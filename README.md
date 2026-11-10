@@ -61,22 +61,23 @@ On your phone: **WhatsApp → Settings → Linked devices → Link a device → 
 | Groq (llama-3.3-70b) | `GROQ_API_KEY` — free at [console.groq.com](https://console.groq.com) | fast, smart, recommended |
 | OpenRouter (backup) | `OPENROUTER_API_KEY` — free tier | used if Groq fails |
 | Pollinations (keyless) | none | always-on fallback, so the bot chats even with zero keys |
+| NABEES AI (GPT-5 Luna / DeepSeek) | `NABEES_API_KEY` — free | last-resort brain; same key powers video downloads |
 
 Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_KEY`.
 
-## Optional: video download key
+## Optional keys
 
-`.song` works out of the box. YouTube/TikTok/Instagram **video** downloads go through a provider that now requires a free API key: sign up at [apis.nabeestech.com](https://apis.nabeestech.com), copy your key, and set `NABEES_API_KEY` (env var on Render, or in `.env`). Without it, video commands say so plainly instead of failing silently.
+`.song` works out of the box. `NABEES_API_KEY` (free — sign up at [apis.nabeestech.com](https://apis.nabeestech.com), or use the public free key `nabeestech`, ~100 requests/day) adds: real YouTube copies of songs the music library only has covers of, YouTube/TikTok/Instagram **video** downloads, and the backup AI models. `.removebg` optionally takes `PHOTOROOM_API_KEY`. Without any keys every other command still works — the bot says so plainly instead of failing silently.
 
 ## What DamzD can do
 
-`.menu` shows live sections; `.menu news` opens a section. Highlights:
+`.menu` shows live sections; `.menu news` opens a section. `.help` (or `.commands`) prints **every command with what it does**; `.help song` explains one command. Highlights:
 
 - **🤖 General** — menu, ping, alive, owner card (.vcf), time/date, jid, version
 - **💬 AI & Chat** — `.ai` plus styled brains: `.gpt`, `.claude`, `.gemini`, `.deepseek`, `.qwen`, `.fable5`, `.wormgpt`, `.mathgpt`, `.aidetect`, `.translate`
 - **🎨 AI Media** — `.flux` image generation, `.tts` voice notes, `.vn2text` transcription, `.ssweb` screenshots
 - **📰 News** — BBC, CNN, Al Jazeera, Guardian, Punch Nigeria and 9 more desks
-- **📥 Downloads** — `.song`/`.play` send **full songs** (JioSaavn engine — no YouTube dependency, works from Render), TikTok, Instagram, Facebook, X/Twitter, YouTube (video + audio via the optional key below), Spotify previews, `.ytsearch`
+- **📥 Downloads** — `.song`/`.play` send **full songs** (real-artist verification: the engine identifies the official recording via Apple's catalogue, pulls the verified track from JioSaavn at up to 320kbps, and never passes a cover off as the song — for tracks the library lacks it routes to YouTube, and as a last resort sends the official 30-second preview), TikTok, Instagram, Facebook, X/Twitter, YouTube (video + audio via the optional key below), Spotify previews, `.ytsearch`
 - **👥 Groups** — in self mode the owner just talks and she answers (no @ needed); she also answers @-mentions, and every command works in groups — the ⚡ reaction confirms she received it
 - **🎮 Games** — trivia, riddles, 8ball, dice, polls, calculator, multiplayer Word Chain (`.wcg`)
 - **🎉 Fun** — jokes (dad, Chuck Norris, programming), facts, animals, memes, quotes, history

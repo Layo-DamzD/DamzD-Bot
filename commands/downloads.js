@@ -2,8 +2,10 @@ import {
   requirePlatformUrl,
   resolveAllInOne,
   resolveYouTubeVideo,
+  resolveYouTubeAudioNabees,
   searchYouTube,
   searchYouTubeAudio,
+  searchYouTubeNabees,
   mediaKind,
   cleanTitle,
   PLATFORM_HOSTS
@@ -37,25 +39,68 @@ async function viaAio(ctx, label) {
   await deliver(ctx, resolved);
 }
 
-// Shared song pipeline: JioSaavn first (full tracks, no YouTube involved,
-// works from Render), then the legacy YouTube play service. Always sends the
-// audio itself, never just a link.
+// Shared song pipeline, in order of quality:
+// 1. JioSaavn when the official artist is verified — the real track, up to 320kbps.
+// 2. JioSaavn without identification (regional tracks Apple does not list) —
+//    the library's best match is very likely the real recording.
+// 3. Real YouTube audio via the keyless public route, then NABEES conversion
+//    when the owner's free key is configured.
+// 4. Honest last resort: Apple's official 30-second preview — never a cover
+//    pretending to be the song.
+async function sendAudioBuffer(ctx, song) {
+  const name = song.artist ? song.artist + " - " + song.title : song.title;
+  await ctx.send({ audio: song.buffer, mimetype: "audio/mp4", fileName: cleanTitle(name) + ".m4a", ptt: false });
+}
+
+async function sendAudioUrl(ctx, url, title) {
+  await ctx.send({ audio: { url }, mimetype: "audio/mpeg", fileName: cleanTitle(title) + ".mp3", ptt: false });
+}
+
 async function sendSong(ctx, query) {
   const { downloadSong } = await import("../src/saavn.js");
+  const { identifyTrack } = await import("../src/apis.js");
+  let song = null;
   try {
-    const song = await downloadSong(query);
-    await ctx.typing(800);
-    const name = song.artist ? song.artist + " - " + song.title : song.title;
-    await ctx.send({ audio: song.buffer, mimetype: "audio/mp4", fileName: cleanTitle(name) + ".m4a", ptt: false });
+    song = await downloadSong(query);
   } catch {
-    const result = await searchYouTubeAudio(query);
-    await ctx.send({
-      audio: { url: result.url },
-      mimetype: "audio/mpeg",
-      fileName: cleanTitle(result.title) + ".mp3",
-      ptt: false
-    });
+    song = null;
   }
+  if (song?.artistVerified) {
+    await ctx.typing(800);
+    return sendAudioBuffer(ctx, song);
+  }
+  if (song && !song.expectedArtist) {
+    await ctx.typing(800);
+    return sendAudioBuffer(ctx, song);
+  }
+  try {
+    const result = await searchYouTubeAudio(query);
+    await ctx.typing(800);
+    return await sendAudioUrl(ctx, result.url, result.title);
+  } catch {
+    /* keep trying */
+  }
+  if (String(process.env.NABEES_API_KEY || "").trim()) {
+    try {
+      const found = await searchYouTubeNabees(query);
+      const audio = await resolveYouTubeAudioNabees(found.url);
+      await ctx.typing(800);
+      return await sendAudioUrl(ctx, audio.url, audio.title || found.title);
+    } catch {
+      /* keep trying */
+    }
+  }
+  const identified = await identifyTrack(query);
+  if (identified?.preview) {
+    await ctx.reply(
+      "The full-track services are refusing me right now, so here is the official short preview of \"" +
+      identified.track + "\" by " + identified.artist + " instead — try again later for the whole song."
+    );
+    return sendAudioUrl(ctx, identified.preview, identified.artist + " - " + identified.track + " (preview)");
+  }
+  throw new Error(
+    "I could not get a clean copy of that song — try the exact title, or add a free NABEES_API_KEY (apis.nabeestech.com) to my settings for the full YouTube catalogue"
+  );
 }
 
 export default [

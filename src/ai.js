@@ -111,6 +111,40 @@ async function callPollinations(messages) {
   return stripThinking(text);
 }
 
+// NABEES free AI Studio models (GPT-5 Luna, DeepSeek) — the owner's one free
+// key (same key that powers video downloads) becomes an extra AI brain when
+// every other service is quiet. Kept last so the daily quota stays for music.
+async function callNabeesAI(chat) {
+  const apiKey = String(process.env.NABEES_API_KEY || "").trim();
+  if (!apiKey) throw new Error("no-key");
+  const system = chat.find(message => message.role === "system")?.content || "";
+  const turns = chat
+    .filter(message => message.role !== "system")
+    .slice(-6)
+    .map(message => (message.role === "assistant" ? "You said: " : "They said: ") + String(message.content || "").slice(0, 500));
+  const prompt = (String(system).slice(0, 1200) + "\n\nConversation so far:\n" + turns.join("\n")).slice(0, 3500);
+  for (const endpoint of ["gpt5-luna", "deepseek-v4-flash"]) {
+    try {
+      const response = await fetch(
+        "https://apis.nabeestech.com/api/v1/ai/" + endpoint + "?apikey=" + encodeURIComponent(apiKey),
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ q: prompt }),
+          signal: AbortSignal.timeout(90000)
+        }
+      );
+      if (!response.ok) continue;
+      const payload = await response.json().catch(() => null);
+      const text = String(payload?.response || "").trim();
+      if (text) return stripThinking(text);
+    } catch {
+      continue;
+    }
+  }
+  throw new Error("the backup AI services had nothing to say. Try again in a moment.");
+}
+
 export async function askAI({ messages, ownerName, style } = {}) {
   const chat = [
     { role: "system", content: systemPrompt({ ownerName, style }) },
@@ -148,7 +182,17 @@ export async function askAI({ messages, ownerName, style } = {}) {
     }
   }
   // Keyless fallback so the bot keeps chatting even before any API key is added.
-  return callPollinations(chat);
+  try {
+    return await callPollinations(chat);
+  } catch (error) {
+    failures.push(error?.message);
+  }
+  // Last resort: the owner's free NABEES key unlocks GPT-5/DeepSeek models.
+  try {
+    return await callNabeesAI(chat);
+  } catch {
+    throw new Error("every AI service I know is quiet right now. Try again in a moment.");
+  }
 }
 
 export async function askAIAboutText({ prompt, history = [], ownerName, style } = {}) {

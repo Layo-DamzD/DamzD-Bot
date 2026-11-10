@@ -423,6 +423,33 @@ export async function transcribeAudio(buffer, { filename = "voice.ogg", mimetype
   return text;
 }
 
+// Identify the official recording behind a free-form query via Apple's public
+// iTunes search — keyless, dependable from datacenter hosts. The song engine
+// uses this to separate the real "Alan Walker - Faded" from the many covers
+// that flood other libraries. Returns { artist, track, preview } or null.
+export async function identifyTrack(query) {
+  const term = String(query || "").trim().slice(0, 120);
+  if (!term) return null;
+  try {
+    const payload = await fetchJson(
+      "https://itunes.apple.com/search?term=" + encodeURIComponent(term) +
+      "&limit=3&media=music&entity=song",
+      { timeoutMs: 15000, label: "music library" }
+    );
+    const hit = Array.isArray(payload?.results)
+      ? payload.results.find(item => item?.trackName && item?.artistName)
+      : null;
+    if (!hit) return null;
+    return {
+      artist: String(hit.artistName || "").trim(),
+      track: String(hit.trackName || "").trim(),
+      preview: /^https:\/\//.test(String(hit.previewUrl || "")) ? String(hit.previewUrl) : ""
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function defineWord(word) {
   const clean = String(word || "").trim().toLowerCase();
   if (!/^[a-z-]{2,30}$/.test(clean)) return false;

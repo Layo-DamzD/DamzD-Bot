@@ -39,6 +39,83 @@ function buildCategoryOverview(commands, prefix) {
   return lines.join("\n");
 }
 
+function buildFullList(commands, prefix) {
+  const categories = new Map();
+  for (const command of commands) {
+    if (command.hidden) continue;
+    const list = categories.get(command.category) || [];
+    list.push(command);
+    categories.set(command.category, list);
+  }
+  const icons = {
+    General: "🤖",
+    "AI & Chat": "💬",
+    "AI Media": "🎨",
+    News: "📰",
+    Downloads: "📥",
+    Games: "🎮",
+    Fun: "🎉",
+    Group: "👥",
+    Anime: "💞",
+    Canvas: "🖼",
+    Tools: "🛠",
+    Privacy: "🔒",
+    Status: "📱",
+    Channel: "📢",
+    Owner: "👑"
+  };
+  const lines = [
+    "*Everything I can do — " + commands.filter(command => !command.hidden).length + " commands*",
+    ""
+  ];
+  for (const [category, list] of categories.entries()) {
+    lines.push((icons[category] || "•") + " *" + category + "*");
+    for (const command of list) {
+      const aliases = (command.aliases || []).length
+        ? " (or " + command.aliases.map(a => prefix + a).join(", ") + ")"
+        : "";
+      lines.push("  " + prefix + command.name + " — " + command.description + aliases);
+    }
+    lines.push("");
+  }
+  lines.push("And you can always just talk to me normally.");
+  return lines.join("\n").trim();
+}
+
+function buildCommandDetail(commands, prefix, wanted) {
+  const lower = String(wanted || "").toLowerCase().replace(/^\./, "").trim();
+  const icons = {
+    General: "🤖",
+    "AI & Chat": "💬",
+    "AI Media": "🎨",
+    News: "📰",
+    Downloads: "📥",
+    Games: "🎮",
+    Fun: "🎉",
+    Group: "👥",
+    Anime: "💞",
+    Canvas: "🖼",
+    Tools: "🛠",
+    Privacy: "🔒",
+    Status: "📱",
+    Channel: "📢",
+    Owner: "👑"
+  };
+  for (const command of commands) {
+    if (command.hidden) continue;
+    const names = [command.name, ...(command.aliases || [])];
+    if (!names.includes(lower)) continue;
+    const aliases = (command.aliases || []).length
+      ? "\nAlso answers to: " + command.aliases.map(a => prefix + a).join(", ")
+      : "";
+    return (
+      (icons[command.category] || "•") + " *" + prefix + command.name + "* — " + command.category + "\n" +
+      command.description + aliases
+    );
+  }
+  return null;
+}
+
 function buildSection(commands, prefix, wanted) {
   const lower = String(wanted || "").trim().toLowerCase();
   const icons = {
@@ -123,9 +200,9 @@ function uptimeText() {
 export default [
   {
     name: "menu",
-    aliases: ["help", "commands"],
+    aliases: ["sections"],
     category: "General",
-    description: "show everything I can do",
+    description: "show my sections at a glance",
     run: async ctx => {
       const wanted = String(ctx.args || "").trim();
       const section = wanted ? buildSection(ctx.commands, ctx.config.prefix, wanted) : null;
@@ -136,6 +213,32 @@ export default [
         return;
       }
       await ctx.reply(section || buildCategoryOverview(ctx.commands, ctx.config.prefix));
+    }
+  },
+  {
+    name: "help",
+    aliases: ["commands", "allcommands", "cmds"],
+    category: "General",
+    description: "the full list of every command and what it does",
+    run: async ctx => {
+      const wanted = String(ctx.args || "").trim();
+      if (!wanted) {
+        await ctx.reply(buildFullList(ctx.commands, ctx.config.prefix));
+        return;
+      }
+      const detail = buildCommandDetail(ctx.commands, ctx.config.prefix, wanted);
+      if (detail) {
+        await ctx.reply(detail);
+        return;
+      }
+      const section = buildSection(ctx.commands, ctx.config.prefix, wanted);
+      if (section) {
+        await ctx.reply(section);
+        return;
+      }
+      await ctx.reply(
+        "I do not know *" + wanted + "*. Send " + ctx.config.prefix + "help for everything I understand."
+      );
     }
   },
   {

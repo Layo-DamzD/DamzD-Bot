@@ -5,7 +5,7 @@
 
 import CryptoJS from "crypto-js";
 import { fetchJson } from "./utils.js";
-import { fetchBuffer } from "./apis.js";
+import { fetchBuffer, identifyTrack } from "./apis.js";
 
 const SAAVN_API = "https://www.jiosaavn.com/api.php";
 const SAAVN_KEY = CryptoJS.enc.Utf8.parse("38346591");
@@ -45,6 +45,25 @@ const VARIANT_LABELS = [
   "bass boosted", "reverb", "lofi", "lo-fi"
 ];
 
+// Queries like "Alan x walkers" choke the library's literal search. Dropping
+// one-letter tokens gives the search something it can actually match.
+function cleanSearchQuery(query) {
+  return String(query || "").toLowerCase().split(/\s+/).filter(t => t.length > 1).join(" ");
+}
+
+// True when the expected official artist actually appears among the result's
+// artists — the difference between the real "Faded" and a random cover.
+export function artistMatches(expected, actual) {
+  const norm = value => String(value || "").toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/).filter(Boolean);
+  const want = norm(expected);
+  if (!want.length) return false;
+  const have = norm(actual).join(" ");
+  return want.some(word => word.length > 2 && have.includes(word));
+}
+
 // Rank results by how many of the query's words appear in the track's own
 // metadata — so "alan walker faded" prefers the real Alan Walker song over
 // the many covers, and a stray "x" in the query does not mislead the pick.
@@ -81,31 +100,23 @@ async function saavnSearch(query) {
   return Array.isArray(items) ? items : [];
 }
 
-// Returns { title, artist, duration, image, url320, url96 } for the best
-// match, or throws with a friendly message when nothing sensible is found.
-export async function searchSong(query) {
-  const tokens = String(query || "").toLowerCase().split(/\s+/).filter(t => t.length > 1);
-  const items = await saavnSearch(query);
-  let best = null;
-  let bestScore = -Infinity;
+function rankedSaavnMatches(items, term) {
+  const tokens = String(term || "").toLowerCase().split(/\s+/).filter(t => t.length > 1);
+  const scored = [];
   for (const item of items) {
     const info = item?.more_info || {};
     const encrypted = info.encrypted_media_url || item?.encryptedMediaUrl;
     if (!encrypted) continue;
-    const score = scoreTrack(item, tokens);
-    if (score > bestScore) {
-      bestScore = score;
-      best = { item, info, encrypted };
-    }
+    scored.push({ item, info, encrypted, score: scoreTrack(item, tokens) });
   }
-  if (!best) throw new Error("I could not find that song — try another spelling");
+  return scored.sort((a, b) => b.score - a.score);
+}
 
-  const item = best.item;
-  const info = best.info;
+function buildSong(item, info, encrypted, query) {
   const artists = Array.isArray(info.artistMap?.primary_artists)
     ? info.artistMap.primary_artists.map(a => a?.name || "").filter(Boolean).join(", ")
     : decodeEntities(info.singers || info.primaryArtists || item?.subtitle || "");
-  const base = decryptMediaUrl(best.encrypted);
+  const base = decryptMediaUrl(encrypted);
   if (!base.startsWith("http")) throw new Error("the music library gave me a broken link for that song");
   return {
     title: decodeEntities(item?.title || info.title || query).slice(0, 90),
@@ -116,6 +127,55 @@ export async function searchSong(query) {
     url320: base.replace("_96.mp4", "_320.mp4"),
     url96: base
   };
+}
+
+// Returns { title, artist, duration, image, url320, url96, artistVerified }
+// for the best match. artistVerified means the official artist (identified
+// through Apple's catalogue) really appears on the track — a cover never
+// passes, so callers can prefer a real copy elsewhere when it is false.
+export async function searchSong(query) {
+  const raw = String(query || "").trim();
+  const cleaned = cleanSearchQuery(raw);
+  if (!cleaned) throw new Error("tell me the song or artist name");
+
+  const identified = await identifyTrack(raw);
+  const attempts = [];
+  if (identified?.artist && identified?.track) {
+    attempts.push({ term: (identified.artist + " " + identified.track).slice(0, 140), expected: identified.artist });
+  }
+  attempts.push({ term: cleaned, expected: identified?.artist || "" });
+  // The library's search is oddly literal — "burna boy last last" returns
+  // zero results while the bare title returns ten. A title-only attempt with
+  // the artist still verified afterwards rescues exactly those cases.
+  if (identified?.track) {
+    attempts.push({ term: identified.track.slice(0, 140), expected: identified.artist });
+  }
+
+  let fallback = null;
+  for (const attempt of attempts) {
+    let items = [];
+    try {
+      items = await saavnSearch(attempt.term);
+    } catch {
+      continue;
+    }
+    // Walk the whole ranked list — the real recording often sits below the
+    // karaoke/cover variants that flood the top of the results.
+    for (const match of rankedSaavnMatches(items, attempt.term).slice(0, 6)) {
+      let song;
+      try {
+        song = buildSong(match.item, match.info, match.encrypted, attempt.term);
+      } catch {
+        continue;
+      }
+      if (artistMatches(attempt.expected, song.artist)) {
+        return { ...song, artistVerified: true, expectedArtist: attempt.expected };
+      }
+      if (!fallback) fallback = { ...song, artistVerified: false, expectedArtist: attempt.expected };
+    }
+  }
+  if (fallback) return fallback;
+  throw new Error("I could not find that song — try another spelling");
 }
 
 // Full song as a Buffer — prefers the 320kbps copy and quietly falls back to
