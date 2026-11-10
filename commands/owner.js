@@ -179,6 +179,36 @@ export default [
     }
   },
   {
+    name: "pause",
+    hidden: true,
+    category: "Owner",
+    description: "go completely silent until you send .resume",
+    run: async ctx => {
+      if (!ctx.isOwner) throw new Error("this is an owner command");
+      ctx.store.set("pausedOn", true);
+      await ctx.reply(
+        "💤 Paused — I stay linked but I will not read, react or answer anything until you send " +
+        ctx.config.prefix + "resume."
+      );
+    }
+  },
+  {
+    name: "resume",
+    aliases: ["unpause"],
+    hidden: true,
+    category: "Owner",
+    description: "wake me up after .pause",
+    run: async ctx => {
+      if (!ctx.isOwner) throw new Error("this is an owner command");
+      if (!ctx.store.get("pausedOn", false)) {
+        await ctx.reply("I am not paused — I am right here. 😊");
+        return;
+      }
+      ctx.store.set("pausedOn", false);
+      await ctx.reply("☀️ Back online — I can hear you again.");
+    }
+  },
+  {
     name: "restart",
     hidden: true,
     category: "Owner",

@@ -18,7 +18,9 @@ import { detectPlatform, resolveAllInOne, mediaKind, cleanTitle } from "./downlo
 import { messageText, mentionedJids, quotedParticipant, numberFromJid, sleep } from "./utils.js";
 import { config as appConfig, isOwnerNumber, addRuntimeOwner } from "./config.js";
 import { WELCOME_ON, GOODBYE_ON, ANTILINK_ON } from "./store.js";
-import { registerCallHook, runSideEffects } from "./hooks.js";
+import { registerCallHook, runSideEffects, recordActivity } from "./hooks.js";
+import { HARD_PAUSED, PAUSE_NOTE } from "./flags.js";
+import { resolveJidNumber } from "./lidmap.js";
 
 const MAX_PROCESSED_IDS = 2000;
 const AI_COOLDOWN_MS = 2500;
@@ -198,6 +200,16 @@ export async function processMessage(deps, sock, msg) {
   const ctx = createContext({ sock, msg, config: appConfig, store: deps.store, memory: deps.memory });
   ctx.commands = deps.commands || [];
   if (!ctx.isOwner && deps.store.get("banned", []).includes(ctx.senderNumber)) return;
+
+  // Pause gate. The hard pause (flags.js) never even starts the socket, so
+  // this branch handles the soft pause: she stays connected but ignores
+  // everything except the owner asking her to resume.
+  if (deps.store.get("pausedOn", false)) {
+    const parsedEarly = resolveCommandInput(text, appConfig.prefix);
+    const wantsResume = ctx.isOwner && parsedEarly && ["resume", "unpause"].includes(parsedEarly.name);
+    if (!wantsResume) return;
+  }
+
   const restricted = !allowedSender(ctx);
 
   if (ctx.isGroup) {
@@ -358,6 +370,8 @@ export class DamzDBot {
       commands: this.commands.length,
       accessMode: appConfig.accessMode,
       aiBrain: hasAIBrain(),
+      paused: Boolean(HARD_PAUSED || this.store?.get?.("pausedOn", false)),
+      pauseNote: HARD_PAUSED ? PAUSE_NOTE : (this.store?.get?.("pausedOn", false) ? "Paused with .pause — .resume wakes me up." : null),
       appVersion: APP_VERSION,
       lib: "baileys " + LIB_VERSION,
       pairingLog: this.pairingLog
@@ -365,6 +379,13 @@ export class DamzDBot {
   }
 
   async start() {
+    // Hard pause from the repo: keep the web dashboard alive but never touch
+    // WhatsApp. This is how the owner silences her without Render access.
+    if (HARD_PAUSED) {
+      this.logPairing("hard pause — WhatsApp stays offline (switch in src/flags.js)");
+      console.log("[" + appConfig.name + "] hard-paused from the code — not connecting to WhatsApp. Flip HARD_PAUSED in src/flags.js to bring her back.");
+      return null;
+    }
     const sessionDirectory = path.resolve(appConfig.sessionDirectory);
     const { state, saveCreds } = await useMultiFileAuthState(sessionDirectory);
     let version;
@@ -509,9 +530,17 @@ export class DamzDBot {
 
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
       if (type !== "notify") return;
+      const softPaused = this.store.get("pausedOn", false);
       for (const msg of messages) {
         try {
-          await runSideEffects(sock, { store: this.store }, msg);
+          if (softPaused) {
+            // While paused: keep the statistics alive silently (no reactions,
+            // no auto-typing, no anti-delete pings) and let processMessage's
+            // pause gate decide whether the owner's .resume gets through.
+            await recordActivity(sock, msg);
+          } else {
+            await runSideEffects(sock, { store: this.store }, msg);
+          }
           await processMessage({
             processed: this.processed,
             store: this.store,
@@ -529,18 +558,24 @@ export class DamzDBot {
       try {
         const jid = String(id || "");
         if (!jid.endsWith("@g.us")) return;
+        // Members can arrive as privacy LIDs — greet them by their real number
+        // when WhatsApp's mapping knows it, never by raw LID digits.
+        const names = [];
+        const mentions = [];
+        for (const participant of participants) {
+          const jidEntry = typeof participant === "string" ? participant : String(participant?.id || "");
+          const resolved = await resolveJidNumber(sock, jidEntry);
+          if (resolved) {
+            names.push("@" + resolved.number);
+            mentions.push(resolved.jid);
+          }
+        }
+        const greet = names.length ? names.join(" ") : "everyone";
+        const extra = names.length ? { mentions } : {};
         if (action === "add" && this.store.get(WELCOME_ON + ":" + jid, false)) {
-          const names = participants.map(p => "@" + numberFromJid(p)).join(" ");
-          await sock.sendMessage(jid, {
-            text: "Welcome " + names + ". Glad to have you here. 😊",
-            mentions: participants
-          });
+          await sock.sendMessage(jid, { text: "Welcome " + greet + ". Glad to have you here. 😊", ...extra });
         } else if (action === "remove" && this.store.get(GOODBYE_ON + ":" + jid, false)) {
-          const names = participants.map(p => "@" + numberFromJid(p)).join(" ");
-          await sock.sendMessage(jid, {
-            text: "Take care, " + names + ". 👋",
-            mentions: participants
-          });
+          await sock.sendMessage(jid, { text: "Take care, " + greet + ". 👋", ...extra });
         }
       } catch (error) {
         console.error("[" + appConfig.name + "] greeting error:", error?.message);

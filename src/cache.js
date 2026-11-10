@@ -1,5 +1,15 @@
 // Shared in-memory caches: message history for anti-delete / view-once
-// recovery, plus lightweight activity tracking for group commands.
+// recovery, plus PERSISTENT activity tracking for the group commands.
+//
+// The old activity tracker was a plain Map, so every restart (and every
+// deploy — Render's disk is ephemeral) wiped it and .ghost immediately
+// reported the whole group as quiet, including its chattiest members.
+// Activity now lives in data/activity.json with a debounced writer, and each
+// entry remembers BOTH forms of a member's identity (phone number and LID)
+// so lists stay correct in WhatsApp's LID-mode groups.
+
+import fs from "node:fs";
+import path from "node:path";
 
 const MAX_MESSAGES = 600;
 const messages = new Map();
@@ -22,35 +32,105 @@ export function dropCached(key) {
   messages.delete(String(key || ""));
 }
 
-// ---- group activity (used by .top, .ghost, .onlineusers) ----
-const activity = new Map();
+// ---- persistent group activity (used by .top, .ghost, .onlineusers, .roast) ----
+const SAVE_EVERY_MS = 15000;
+let storePath = null;
+let db = { groups: {} };
+let dirty = false;
+let saveTimer = null;
 
-function activityKey(jid, sender) {
-  return jid + "|" + sender;
-}
-
-export function bumpActivity(jid, sender) {
-  if (!jid || !sender) return;
-  const key = activityKey(jid, sender);
-  const current = activity.get(key) || { count: 0, last: 0 };
-  current.count += 1;
-  current.last = Date.now();
-  activity.set(key, current);
-  if (activity.size > 2000) {
-    for (const [k, value] of activity) {
-      if (Date.now() - value.last > 86400000) activity.delete(k);
+export function initActivityStore(dataDirectory) {
+  storePath = path.join(path.resolve(dataDirectory), "activity.json");
+  try {
+    if (fs.existsSync(storePath)) {
+      const parsed = JSON.parse(fs.readFileSync(storePath, "utf8"));
+      if (parsed && typeof parsed === "object" && parsed.groups && typeof parsed.groups === "object") {
+        db = parsed;
+      }
+    }
+  } catch {
+    db = { groups: {} };
+  }
+  if (!db.groups || typeof db.groups !== "object") db.groups = {};
+  if (!saveTimer) {
+    saveTimer = setInterval(() => { if (dirty) saveNow(); }, SAVE_EVERY_MS);
+    if (saveTimer.unref) saveTimer.unref();
+  }
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    try {
+      process.once(signal, () => { if (dirty) saveNow(); });
+    } catch {
+      /* not all environments expose process signals */
     }
   }
 }
 
+function saveNow() {
+  if (!storePath) return;
+  try {
+    fs.mkdirSync(path.dirname(storePath), { recursive: true });
+    fs.writeFileSync(storePath, JSON.stringify(db));
+    dirty = false;
+  } catch {
+    /* a failed save is retried on the next tick */
+  }
+}
+
+// Force a write now — used before a clean shutdown and by the tests.
+export function flushActivity() {
+  saveNow();
+}
+
+function groupDb(jid) {
+  const key = String(jid || "");
+  if (!key) return null;
+  let group = db.groups[key];
+  if (!group || typeof group !== "object") {
+    group = { firstSeen: Date.now(), total: 0, rows: {} };
+    db.groups[key] = group;
+    dirty = true;
+  }
+  if (!group.rows || typeof group.rows !== "object") group.rows = {};
+  if (!group.firstSeen) group.firstSeen = Date.now();
+  if (typeof group.total !== "number") group.total = 0;
+  return group;
+}
+
+// pn and lid are digit strings (either may be empty). The row is keyed by the
+// phone number when it is known so the history is stable across LID rotation.
+export function bumpActivity(jid, pn, lid) {
+  const group = groupDb(jid);
+  if (!group || (!pn && !lid)) return;
+  const key = pn || "~" + lid;
+  const row = group.rows[key] || { pn: pn || "", lid: lid || "", count: 0, last: 0 };
+  if (pn) row.pn = pn;
+  if (lid) row.lid = lid;
+  row.count += 1;
+  row.last = Date.now();
+  group.rows[key] = row;
+  group.total += 1;
+  dirty = true;
+}
+
+// All recorded rows for a group: [{ pn, lid, count, last }]
 export function activityFor(jid) {
-  const rows = [];
-  for (const [key, value] of activity) {
-    if (key.startsWith(jid + "|")) {
-      rows.push({ sender: key.split("|")[1], count: value.count, last: value.last });
-    }
-  }
-  return rows;
+  const group = db.groups[String(jid || "")];
+  if (!group || !group.rows) return [];
+  return Object.values(group.rows).map(row => ({
+    pn: String(row.pn || ""),
+    lid: String(row.lid || ""),
+    count: Number(row.count || 0),
+    last: Number(row.last || 0)
+  }));
+}
+
+// How long the bot has been watching a group and how many messages it saw —
+// the honest basis for "who never talks" claims.
+export function activityWindow(jid) {
+  const group = db.groups[String(jid || "")];
+  const firstSeen = Number(group?.firstSeen || Date.now());
+  const total = Number(group?.total || 0);
+  return { firstSeen, total, watchedMs: Date.now() - firstSeen };
 }
 
 // ---- recent group chat log (used by .tldr, .lore, .roast) ----

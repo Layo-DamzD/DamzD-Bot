@@ -81,14 +81,16 @@ Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_K
 - **👥 Groups** — in self mode the owner just talks and she answers (no @ needed); she also answers @-mentions, and every command works in groups — the ⚡ reaction confirms she received it
 - **🎮 Games** — trivia, riddles, 8ball, dice, polls, calculator, multiplayer Word Chain (`.wcg`)
 - **🎉 Fun** — jokes (dad, Chuck Norris, programming), facts, animals, memes, quotes, history
-- **👥 Group** — kick/add/promote, tagall, welcome/goodbye, antilink with 3-strike warnings, `.tldr`, `.lore`, `.roast`, `.top`, `.ghost`, invite links
+- **👥 Group** — kick/add/promote, tagall, welcome/goodbye, antilink with 3-strike warnings, `.tldr`, `.lore`, `.roast`, `.top`, `.ghost`, invite links. **Group stats are honest**: member numbers are resolved to real phone numbers (never WhatsApp privacy-LID digits), activity is tracked on disk so restarts don't wipe it, `.ghost` tells you exactly how long it has been watching and refuses to judge before it has enough chat history, and the bot itself never appears in its own lists
 - **💞 Anime** — 39 reaction GIF commands (hug, kiss, pat, yeet…)
 - **🖼 Canvas** — fake chat screenshots, iPhone/Windows quotes, Nokia messages, memes, Free Fire cards, payment receipts
 - **🛠 Tools** — `.sticker`, `.vv` **silent** view-once recovery (media lands in your own "Message yourself" chat — no reply, no reaction, no trace in the original chat), `.save`, TikTok stalk, lyrics, Bible, wiki, NASA, Pokémon, URL shortener
 - **🔒 Privacy** — anti-delete/anti-edit alerts, pin/archive/mute/star chats, disappearing messages, block/unblock, message edit/unsend/forward
 - **📱 Status** — post statuses (text/media/mentions), auto-view + auto-react statuses, typing/recording presence
 - **📢 Channel** — follow/unfollow channels, react to posts, post to your own channel
-- **👑 Owner** — mode, ban/unban, broadcast, setprefix, anticall, autoreact, restart, settings
+- **👑 Owner** — mode, ban/unban, broadcast, setprefix, anticall, autoreact, restart, settings, `.pause`/`.resume` (go completely silent and back, right from WhatsApp)
+
+**Remote kill switch:** `src/flags.js` holds a `HARD_PAUSED` switch — flip it in the repo and the deploy silences the bot entirely (dashboard keeps running and explains why) even with no access to the Render dashboard.
 
 ## Dashboard
 

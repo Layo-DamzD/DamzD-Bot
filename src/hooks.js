@@ -3,6 +3,7 @@
 // anti-call. Everything here respects the owner's toggles in the store.
 
 import { messageText, numberFromJid } from "./utils.js";
+import { lidToPhone } from "./lidmap.js";
 import { cacheMessage, getCached, bumpActivity, pushChatLog } from "./cache.js";
 
 function ownerChatOf(sock) {
@@ -26,6 +27,46 @@ export function registerCallHook(sock, store) {
       sock.sendMessage(owner, { text: "📵 I declined a call from " + who + " (anti-call is on)." }).catch(() => {});
     }
   });
+}
+
+// Silent bookkeeping only: safe to run even while the bot is paused, because
+// it sends nothing — it just keeps the group statistics honest.
+export async function recordActivity(sock, msg, jidArg) {
+  const key = msg?.key;
+  if (!key || !key.id) return;
+  const jid = String(jidArg || key.remoteJid || "");
+  if (!msg.message || jid === "status@broadcast") return;
+  const text = messageText(msg.message);
+  const sender = key.participant ? String(key.participant) : (key.fromMe ? String(sock?.user?.id || jid) : jid);
+  cacheMessage(key.id, { jid, sender, text });
+
+  // Record BOTH identity forms: in LID-mode groups key.participant is a
+  // privacy LID, so the phone number is recovered through the library's
+  // mapping store (cached, best-effort — the row still records the LID when
+  // the mapping is unknown).
+  let pn = "";
+  let lid = "";
+  try {
+    if (key.participant && String(key.participant).endsWith("@lid")) {
+      lid = numberFromJid(key.participant);
+      pn = (await lidToPhone(sock, key.participant))?.number || "";
+    } else if (key.participant) {
+      pn = numberFromJid(key.participant);
+    } else if (key.fromMe) {
+      pn = numberFromJid(sock?.user?.id || "");
+      lid = numberFromJid(sock?.user?.lid || "");
+    } else {
+      pn = numberFromJid(jid);
+    }
+  } catch {
+    /* identity gaps are fine — the row just keeps whichever form is known */
+  }
+  if (pn || lid) bumpActivity(jid, pn, lid);
+  // The chat log stores the phone JID when it is known, so .roast/.tldr can
+  // match senders by real numbers even in LID-mode groups.
+  if (text && jid.endsWith("@g.us") && !key.fromMe) {
+    pushChatLog(jid, pn ? pn + "@s.whatsapp.net" : sender, text, msg.pushName);
+  }
 }
 
 export async function runSideEffects(sock, deps, msg) {
@@ -88,14 +129,7 @@ export async function runSideEffects(sock, deps, msg) {
   if (!msg.message) return;
 
   // ---- cache + activity + chat log ----
-  const text = messageText(msg.message);
-  const sender = key.participant ? String(key.participant) : (key.fromMe ? String(sock?.user?.id || jid) : jid);
-  cacheMessage(key.id, { jid, sender, text });
-  const senderNumber = numberFromJid(sender);
-  if (senderNumber) bumpActivity(jid, senderNumber);
-  if (text && jid.endsWith("@g.us") && !key.fromMe) {
-    pushChatLog(jid, sender, text, msg.pushName);
-  }
+  await recordActivity(sock, msg, jid);
 
   // ---- auto typing / recording indicators ----
   if (store.get("autotype:" + jid, false)) {

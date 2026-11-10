@@ -8,6 +8,7 @@ import { JsonStore } from "./src/store.js";
 import { loadCommands, buildLookup } from "./src/loader.js";
 import { DamzDBot } from "./src/runtime.js";
 import { startHealthServer } from "./src/health.js";
+import { initActivityStore } from "./src/cache.js";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,6 +20,9 @@ async function main() {
   for (const folder of [config.sessionDirectory, config.dataDirectory]) {
     fs.mkdirSync(path.resolve(folder), { recursive: true });
   }
+
+  // Persistent group-activity store — .ghost/.top/.onlineusers survive restarts.
+  initActivityStore(path.resolve(config.dataDirectory));
 
   const commands = await loadCommands(path.join(directory, "commands"));
   const lookup = buildLookup(commands);

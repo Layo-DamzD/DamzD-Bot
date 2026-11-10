@@ -196,6 +196,12 @@ const dashboardHtml = `<!doctype html>
     <p>Starting up — fetching a pairing code…</p>
   </section>
 
+  <section class="card center" id="pausedCard" hidden>
+    <div class="hero">⏸️ <b>Paused</b> — the bot is switched off in the code.</div>
+    <p class="hint" id="pauseNote"></p>
+    <p class="hint">Nothing is being read or sent. When the switch is flipped back, this page returns to the normal pairing screen.</p>
+  </section>
+
   <section id="onlineCard" hidden style="display:flex; flex-direction:column; gap:10px;">
     <div class="hero">✅ Connected — linked to <b id="linkedNumber"></b></div>
     <div class="grid">
@@ -264,6 +270,14 @@ const dashboardHtml = `<!doctype html>
     var pair = document.getElementById("pairCard");
     var wait = document.getElementById("waitCard");
     var on = document.getElementById("onlineCard");
+    var pausedCard = document.getElementById("pausedCard");
+    if (state.paused) {
+      pill.className = "pill err"; pill.textContent = "Paused";
+      pair.hidden = true; wait.hidden = true; on.hidden = true; pausedCard.hidden = false;
+      document.getElementById("pauseNote").textContent = state.pauseNote || "The bot is switched off for now.";
+      return;
+    }
+    pausedCard.hidden = true;
     if (state.connected) {
       pill.className = "pill ok"; pill.textContent = "Online";
       pair.hidden = true; wait.hidden = true; on.hidden = false;
