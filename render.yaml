@@ -18,7 +18,7 @@ services:
       - key: OWNER_NAME
         sync: false    # your name, e.g. Layo
       - key: OWNER_NUMBER
-        sync: false    # international format, no + — e.g. 2347087299884
+        sync: false    # international format, no + — e.g. 2348000000000
       - key: GROQ_API_KEY
         sync: false    # free key from console.groq.com
       # PAIRING_CODE is intentionally NOT set: codes rotate (fresh random 8-digit
