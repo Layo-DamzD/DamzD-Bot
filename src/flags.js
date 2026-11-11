@@ -9,8 +9,8 @@
 // The soft pause (.pause / .resume in WhatsApp) works on top of this when
 // she is running: it keeps the socket alive but ignores everyone.
 
-export const HARD_PAUSED = true;
+export const HARD_PAUSED = false;
 
 export const PAUSE_NOTE =
-  "Layo switched me off for a few days — I am not reading or answering anything right now. " +
+  "I am switched off for a moment — I am not reading or answering anything right now. " +
   "Back online soon.";
