@@ -188,16 +188,6 @@ export async function foxImage() {
   return String(data?.image || "");
 }
 
-export async function randomMeme() {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const meme = await fetchJson("https://meme-api.com/gimme", { label: "meme service" });
-    if (meme?.url && !meme.nsfw && !meme.spoiler) {
-      return { url: meme.url, title: String(meme.title || "").slice(0, 120) };
-    }
-  }
-  throw new Error("the meme shelf was empty this second — try again");
-}
-
 // ---------------------------------------------------------------- knowledge
 
 export async function wikipediaRandom() {

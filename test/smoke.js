@@ -101,6 +101,7 @@ await check("menu shows section overview without any promo footer", async () => 
   assert.match(text, /\*News\*/);
   assert.match(text, /\*Fun\*/);
   assert.ok(!/\*Anime\*/.test(text), "the anime section is gone as requested");
+  assert.ok(!/\*Canvas\*/.test(text), "the fake-generator canvas section is gone as requested");
   assert.ok(!/powered by|pairing portal|benfei/i.test(text), "no promotional text allowed");
 });
 
@@ -142,14 +143,13 @@ await check("news command lists its desks", async () => {
   assert.match(text, /punch/i);
 });
 
-await check("reaction-style fun commands stay wired after the anime removal", async () => {
+await check("honest fun commands stay wired after the anime and fake-generator removals", async () => {
   const names = new Set(commands.map(command => command.name));
-  for (const expected of ["8ball", "coinflip", "meme", "dog"]) {
+  for (const expected of ["8ball", "coinflip", "dog", "cat"]) {
     assert.ok(names.has(expected), "missing command: " + expected);
   }
-  const canvasNames = new Set(commands.map(command => command.name));
-  for (const expected of ["fakettc", "receipt", "nokiamsg", "iqc", "fakeff"]) {
-    assert.ok(canvasNames.has(expected), "missing canvas command: " + expected);
+  for (const removed of ["fakettc", "fakechat", "receipt", "nokiamsg", "meme", "meme2", "fakeff", "fakeffduo", "ffgirl", "canvasquote", "iqc", "wndwqute"]) {
+    assert.ok(!names.has(removed), "fake-generator command still present: " + removed);
   }
 });
 

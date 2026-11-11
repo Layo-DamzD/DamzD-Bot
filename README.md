@@ -10,7 +10,7 @@ Most free WhatsApp bots staple an advertisement onto every single message. DamzD
 
 - 🗣 **Chats like a real person** — natural language, short replies, memory of the conversation, calm manners.
 - 🚫 **Never advertises** — the whole reply pipeline is covered by a smoke test that fails if any promo text sneaks in.
-- 🧰 **Full toolkit** — 246 command names across downloads, AI, news, games, group management, canvas images, stickers, privacy tools and more.
+- 🧰 **Full toolkit** — 200 commands across 13 sections: downloads, AI, news, games, group management, stickers, privacy tools and more — every fake-screenshot generator removed.
 - 🔒 **Private by default** — self mode: only you (the owner) can use it. Flip to public with one command if you want.
 
 ## Requirements
@@ -80,9 +80,8 @@ Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_K
 - **📥 Downloads** — `.song`/`.play` send **full songs** (real-artist verification: the engine identifies the official recording via Apple's catalogue, pulls the verified track from JioSaavn at up to 320kbps, and never passes a cover off as the song — for tracks the library lacks it routes to YouTube, and as a last resort sends the official 30-second preview), TikTok, Instagram, Facebook, X/Twitter, YouTube (video + audio via the optional key below), Spotify previews, `.ytsearch`
 - **👥 Groups** — in self mode the owner just talks and she answers (no @ needed); she also answers @-mentions, and every command works in groups — the ⚡ reaction confirms she received it
 - **🎮 Games** — trivia, riddles, 8ball, dice, polls, calculator, multiplayer Word Chain (`.wcg`)
-- **🎉 Fun** — jokes (dad, Chuck Norris, programming), facts, animals, memes, quotes, history
+- **🎉 Fun** — jokes (dad, Chuck Norris, programming), facts, animals, quotes, history
 - **👥 Group** — kick/add/promote, tagall, welcome/goodbye, antilink with 3-strike warnings, `.tldr`, `.lore`, `.roast`, `.top`, `.ghost`, invite links. **Group stats are honest**: member numbers are resolved to real phone numbers (never WhatsApp privacy-LID digits), activity is tracked on disk so restarts don't wipe it, `.ghost` tells you exactly how long it has been watching and refuses to judge before it has enough chat history, and the bot itself never appears in its own lists
-- **🖼 Canvas** — fake chat screenshots, iPhone/Windows quotes, Nokia messages, memes, Free Fire cards, payment receipts
 - **🛠 Tools** — `.sticker`, `.vv` **silent** view-once recovery (media lands in your own "Message yourself" chat — no reply, no reaction, no trace in the original chat), `.save`, TikTok stalk, lyrics, Bible, wiki, NASA, Pokémon, URL shortener
 - **🔒 Privacy** — anti-delete/anti-edit alerts, pin/archive/mute/star chats, disappearing messages, block/unblock, message edit/unsend/forward
 - **📱 Status** — post statuses (text/media/mentions), auto-view + auto-react statuses, typing/recording presence
@@ -93,7 +92,7 @@ Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_K
 
 ## Running on your phone (Termux)
 
-Works. npm 12+ refuses git dependencies by default (EALLOWGIT) — the repo ships an `.npmrc` with `allow-git=root`, so a plain `npm install` succeeds. Keys live in a `.env` file next to the code (dotenv loads it automatically). The image-renderer commands degrade to a friendly message on devices where the native canvas can't load; everything else runs exactly as on Render.
+Works. npm 12+ refuses git dependencies by default (EALLOWGIT) — the repo ships an `.npmrc` with `allow-git=root`, so a plain `npm install` succeeds. Keys live in a `.env` file next to the code (dotenv loads it automatically). There is no native-canvas dependency anymore, so nothing degrades on Android — every command runs exactly as on Render.
 
 ## Dashboard
 

@@ -1,7 +1,7 @@
 import { pick, randomInt, quotedText, quotedParticipant } from "../src/utils.js";
 import {
   randomJoke, dadJoke, chuckJoke, programmingJoke, uselessFact, catFact,
-  advice, zenQuote, numberFact, historyToday, dogImage, catImage, foxImage, randomMeme
+  advice, zenQuote, numberFact, historyToday, dogImage, catImage, foxImage
 } from "../src/apis.js";
 import { fetchBuffer } from "../src/apis.js";
 
@@ -351,17 +351,6 @@ export default [
     category: "Fun",
     description: "a random fox photo",
     run: async ctx => sendPicture(ctx, foxImage(), "🦊 Here you go.")
-  },
-  {
-    name: "meme",
-    category: "Fun",
-    description: "a random meme",
-    run: async ctx => {
-      await ctx.typing(1000);
-      const meme = await randomMeme();
-      const buffer = await fetchBuffer(meme.url, { timeoutMs: 60000, label: "meme service" });
-      await ctx.send({ image: buffer, caption: meme.title ? "*" + meme.title + "*" : "" });
-    }
   },
   {
     name: "hello",
