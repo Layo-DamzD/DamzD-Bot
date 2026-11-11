@@ -91,6 +91,10 @@ Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_K
 
 **Remote kill switch:** `src/flags.js` holds a `HARD_PAUSED` switch — flip it in the repo and the deploy silences the bot entirely (dashboard keeps running and explains why) even with no access to the Render dashboard.
 
+## Running on your phone (Termux)
+
+Works. npm 12+ refuses git dependencies by default (EALLOWGIT) — the repo ships an `.npmrc` with `allow-git=root`, so a plain `npm install` succeeds. Keys live in a `.env` file next to the code (dotenv loads it automatically). The image-renderer commands degrade to a friendly message on devices where the native canvas can't load; everything else runs exactly as on Render.
+
 ## Dashboard
 
 Open your bot's URL (locally `http://localhost:3000`, on Render `https://<your-app>.onrender.com`) and you get a live status page:

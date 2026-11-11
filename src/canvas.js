@@ -9,7 +9,25 @@
  * Every exported function returns a Promise<Buffer> containing a PNG.
  */
 
-import { createCanvas } from "@napi-rs/canvas";
+// Lazy + guarded: @napi-rs/canvas ships prebuilt native binaries that cannot
+// load on some platforms (Termux/Android uses bionic libc, the prebuilds are
+// glibc/musl). Load it once here and, if it refuses to load, degrade to a
+// clean friendly error inside the canvas commands instead of crashing the
+// whole bot at boot. On servers (Render) it loads exactly as before.
+let canvasmod = null;
+let canvasBroken = false;
+try {
+  canvasmod = await import("@napi-rs/canvas");
+} catch {
+  canvasBroken = true;
+}
+
+function createCanvas(...args) {
+  if (canvasBroken || !canvasmod) {
+    throw new Error("the image renderer isn't available on this device — every other command works fine");
+  }
+  return canvasmod.createCanvas(...args);
+}
 
 /* ------------------------------------------------------------------ */
 /*  shared helpers                                                     */
