@@ -3,6 +3,7 @@ import { fetchJson, isHttpsUrl } from "./utils.js";
 const AIO_API = "https://apis.nabeestech.com/api/v1/download/aio";
 const YT_VIDEO_API = "https://api-rebix.vercel.app/api/ytv";
 const YT_SEARCH_API = "https://eliteprotech-apis.zone.id/search/ytsearch";
+const YT_AUDIO_API = "https://eliteprotech-apis.zone.id/download/ytmp3";
 const YT_PLAY_API = "https://api.ikyyxd.my.id/search/ytplayv2";
 
 export const PLATFORM_HOSTS = Object.freeze({
@@ -142,8 +143,44 @@ export async function searchYouTube(query) {
 }
 
 export async function searchYouTubeAudio(query) {
-  const payload = await fetchJson(YT_PLAY_API + "?q=" + encodeURIComponent(String(query || "").slice(0, 200)), {
-    timeoutMs: 90000,
+  const term = encodeURIComponent(String(query || "").slice(0, 200));
+  // Primary route, verified working from datacenter hosts (the old yt-play
+  // services all died there): a keyless YouTube search finds the official
+  // video, a keyless converter turns it into a direct MP3 link.
+  try {
+    const found = await fetchJson(YT_SEARCH_API + "?q=" + term, {
+      timeoutMs: 45000,
+      label: "YouTube search"
+    });
+    const videos = found?.results?.videos || found?.results || found?.videos || [];
+    const top = (Array.isArray(videos) ? videos : [])
+      .find(video => safeMediaUrl(video?.url, "video") || video?.id);
+    const videoUrl = top
+      ? (safeMediaUrl(top.url, "video") || (top.id ? "https://www.youtube.com/watch?v=" + top.id : ""))
+      : "";
+    if (videoUrl) {
+      const converted = await fetchJson(YT_AUDIO_API + "?url=" + encodeURIComponent(videoUrl), {
+        timeoutMs: 120000,
+        label: "music service"
+      });
+      const audioUrl = safeMediaUrl(
+        converted?.download?.downloadUrl || converted?.downloadUrl ||
+        converted?.download?.url || converted?.url,
+        "audio"
+      );
+      if (audioUrl) {
+        return {
+          url: audioUrl,
+          title: cleanTitle(converted?.download?.title || top.title || query, "song")
+        };
+      }
+    }
+  } catch {
+    /* fall through to the legacy route */
+  }
+  // Legacy route — dead at the moment, kept for when it wakes back up.
+  const payload = await fetchJson(YT_PLAY_API + "?q=" + term, {
+    timeoutMs: 60000,
     label: "music service"
   });
   const result = payload?.result || payload?.data?.result || payload?.data || {};

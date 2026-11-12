@@ -107,6 +107,12 @@ function rankedSaavnMatches(items, term) {
     const info = item?.more_info || {};
     const encrypted = info.encrypted_media_url || item?.encryptedMediaUrl;
     if (!encrypted) continue;
+    // Karaoke/cover/sped-up candidates are dead weight: they can never pass
+    // artist verification, and when Apple cannot identify the track one of
+    // them could slip through as the "best match". Drop them at the door.
+    const label = decodeEntities((item?.title || "") + " " + (item?.subtitle || "") +
+      " " + (info.subtitle || "")).toLowerCase();
+    if (VARIANT_LABELS.some(v => label.includes(v))) continue;
     scored.push({ item, info, encrypted, score: scoreTrack(item, tokens) });
   }
   return scored.sort((a, b) => b.score - a.score);
