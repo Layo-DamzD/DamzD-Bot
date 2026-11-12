@@ -24,8 +24,14 @@ services:
       # PAIRING_CODE is intentionally NOT set: codes rotate (fresh random 8-digit
       # one per request) so a dead code is always visible on the dashboard. Set a
       # fixed 8-char A-Z0-9 value here only if you really want a constant code.
+      # self = only the owner's WhatsApp gets replies (private bot). Flip to
+      # public from WhatsApp with .mode public if you ever want everyone.
       - key: ACCESS_MODE
-        value: public
+        value: self
+      # How many EXTRA WhatsApps friends may connect alongside the main one,
+      # each with its own private bot. Free tier RAM fits about 2.
+      - key: MAX_SESSIONS
+        value: "2"
       - key: PREFIX
         value: "."
       - key: AUTO_DL

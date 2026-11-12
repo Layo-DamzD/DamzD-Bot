@@ -111,11 +111,22 @@ Endpoints: `/` dashboard · `/status` live JSON feeding it · `/health` liveness
 DamzD ships with a `render.yaml` blueprint and exposes `GET /health` (port `PORT`, default 3000).
 
 1. Push this repo to GitHub. On [render.com](https://render.com): **New → Web Service → Build and deploy from a Git repository** and pick the repo. Render reads `render.yaml` automatically — otherwise set: runtime **Node**, build `npm install`, start `npm start`.
-2. Fill in the environment variables when prompted: `OWNER_NUMBER` (e.g. `2348000000000`), `OWNER_NAME`, `GROQ_API_KEY`. `ACCESS_MODE` ships as `public` in `render.yaml` — set it to `self` in the dashboard if you want the bot to answer you only. You can also flip live anytime with the `.public` / `.private` owner commands.
+2. Fill in the environment variables when prompted: `OWNER_NUMBER` (e.g. `2348000000000`), `OWNER_NAME`, `GROQ_API_KEY`. `ACCESS_MODE` ships as `self` in `render.yaml` — the bot answers its owner only. Flip live anytime with the `.public` / `.private` owner commands.
 3. First boot: open **your app URL** (or the Logs tab) — the pairing code shows on the dashboard and refreshes itself until used. On your phone: **WhatsApp → Settings → Linked devices → Link a device → "Link with phone number instead"**, type the code.
 4. **Keep it awake** — free Render services sleep after ~15 minutes without HTTP traffic. Create a free monitor at [uptimerobot.com](https://uptimerobot.com) or cron-job.org hitting `https://<your-app>.onrender.com/health` every 5–10 minutes and DamzD stays online 24/7.
 5. **Free-tier caveat** — the disk is wiped on every restart/redeploy, so `auth/` is lost and you re-pair (new code appears in the logs). A paid instance with a persistent disk keeps the session forever.
 6. **Never** commit or share your `auth/` folder — anyone holding it controls your WhatsApp.
+
+## Connect your friends (one server, several private bots)
+
+After your own WhatsApp is linked, friends can connect **their own** WhatsApp to the same server and each gets a private bot of their own:
+
+1. Open the dashboard → **"connect another WhatsApp"** → type the friend's number → **Connect**.
+2. A pairing code appears on the dashboard within a few seconds. The friend types it **from their own phone**: WhatsApp → Settings → Linked devices → "Link with phone number instead".
+3. Done — that phone now has its own DamzD: own session, own data, and (with `ACCESS_MODE=self`, the default) commands answer only to that phone. Nobody's chats cross paths.
+4. **Disconnect** on the dashboard stops that bot and wipes its session.
+
+How it works: each extra WhatsApp is a separate isolated child process with its own `auth/` and `data/` folders — the main bot's code runs unchanged per connection. `MAX_SESSIONS` (default 2) caps how many fit; free-tier RAM comfortably hosts the main bot plus about two friends. On Render's free tier a restart/redeploy wipes every session (the main one too), so everyone re-pairs from a fresh dashboard code.
 
 ## Configuration (`.env`)
 
@@ -124,7 +135,8 @@ DamzD ships with a `render.yaml` blueprint and exposes `GET /health` (port `PORT
 | `BOT_NAME` | DamzD | how the bot introduces itself |
 | `OWNER_NAME` | DamzD | the bot calls you this |
 | `OWNER_NUMBER` | *(empty)* | international format, no `+`; empty = first paired number owns the bot |
-| `ACCESS_MODE` | self | `self` = owner only, `public` = everyone (render.yaml ships `public`; flip live with `.public` / `.private`) |
+| `ACCESS_MODE` | self | `self` = owner only, `public` = everyone (render.yaml ships `self`; flip live with `.public` / `.private`) |
+| `MAX_SESSIONS` | 2 | how many extra WhatsApps friends may connect alongside the main bot (each gets its own private bot) |
 | `PREFIX` | `.` | command prefix (`.setprefix` also works live) |
 | `AUTO_DL` | true | auto-fetch media when a social link is sent |
 | `GROQ_API_KEY` | *(empty)* | free AI key, recommended |
