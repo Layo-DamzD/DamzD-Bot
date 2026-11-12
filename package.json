@@ -1,6 +1,6 @@
 {
   "name": "damzd-bot",
-  "version": "1.4.12",
+  "version": "1.4.13",
   "private": true,
   "description": "DamzD \u2014 a personal WhatsApp assistant that chats like a human and runs clean commands. No footers, no ads, no spam.",
   "type": "module",
@@ -18,7 +18,11 @@
     "baileys": "github:doryani-ai/Baileys#fix/companion-reg-refresh",
     "crypto-js": "^4.2.0",
     "dotenv": "^16.6.1",
+    "msedge-tts": "^2.1.1",
     "pino": "^9.7.0",
     "qrcode": "^1.5.4"
+  },
+  "optionalDependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0"
   }
 }

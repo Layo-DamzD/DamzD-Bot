@@ -378,10 +378,43 @@ function looksLikeMp3(buffer) {
   return buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0; // MPEG frame sync
 }
 
+// Human-sounding neural speech from Edge's public read-aloud service — the
+// same voices the Edge browser uses, keyless. It carries real Nigerian
+// English voices (Ezinne, Abeo), so the assistant can sound like home instead
+// of a robot. Languages Edge does not carry (Yoruba, Igbo, Hausa...) still go
+// to Google further down.
+const TTS_VOICE = String(process.env.TTS_VOICE || "en-NG-EzinneNeural");
+
+async function neuralVoice(text) {
+  const { MsEdgeTTS, OUTPUT_FORMAT } = await import("msedge-tts");
+  const tts = new MsEdgeTTS();
+  await tts.setMetadata(TTS_VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+  const { audioStream } = tts.toStream(text);
+  const chunks = [];
+  for await (const chunk of audioStream) chunks.push(chunk);
+  const buffer = Buffer.concat(chunks);
+  if (!looksLikeMp3(buffer)) throw new Error("the neural voice returned no audio");
+  return buffer;
+}
+
 export async function ttsAudio(text, language = "en") {
   const clean = String(text || "").trim();
   if (!clean) throw new Error("give me the text to read out");
   const spoken = clean.slice(0, 200);
+  const truncated = clean.length > 200;
+
+  // Human neural voice first for English — this is the voice people hear.
+  if (String(language).startsWith("en")) {
+    try {
+      return { buffer: await neuralVoice(spoken), truncated };
+    } catch { /* Edge refused or rate-limited — Google still speaks below */ }
+  }
+
+  // Google's voice is robotic but universal: it covers Yoruba, Igbo, Hausa
+  // and friends, and it is the fallback when the neural service refuses.
+  // The free endpoint occasionally answers with an error page instead of
+  // audio when it is rate limiting. Never let fake audio through — one calm
+  // retry, then an honest error the owner can act on.
   const url = "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=" +
     encodeURIComponent(language) + "&q=" + encodeURIComponent(spoken);
   const opts = {
@@ -389,17 +422,24 @@ export async function ttsAudio(text, language = "en") {
     label: "text-to-speech service",
     headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
   };
-  // The free endpoint occasionally answers with an error page instead of
-  // audio when it is rate limiting. Never let fake audio through — one calm
-  // retry, then an honest error the owner can act on.
-  let buffer = await fetchBuffer(url, opts);
-  if (!looksLikeMp3(buffer)) {
+  let buffer;
+  try {
     buffer = await fetchBuffer(url, opts);
     if (!looksLikeMp3(buffer)) {
-      throw new Error("the voice service refused me just now — try again in a minute");
+      buffer = await fetchBuffer(url, opts);
+      if (!looksLikeMp3(buffer)) {
+        throw new Error("the voice service refused me just now — try again in a minute");
+      }
     }
+  } catch (error) {
+    // The endpoint answers 400 for languages it has no voice for (Yoruba and
+    // Igbo are missing there) — say that plainly instead of a raw status code.
+    if (String(error?.message || "").includes("(400)")) {
+      throw new Error("I do not have a voice for that language yet — my English is the clearest one for now");
+    }
+    throw error;
   }
-  return { buffer, truncated: clean.length > 200 };
+  return { buffer, truncated };
 }
 
 export async function transcribeAudio(buffer, { filename = "voice.ogg", mimetype = "audio/ogg" } = {}) {
