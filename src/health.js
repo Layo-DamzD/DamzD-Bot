@@ -38,6 +38,18 @@ const dashboardHtml = `<!doctype html>
   .pill.ok    { background: rgba(37,211,102,.14); color: #25d366; box-shadow: 0 0 14px rgba(37,211,102,.25); }
   .pill.warn  { background: rgba(245,166,35,.14); color: #f5a623; }
   .pill.err   { background: rgba(239,83,80,.14);  color: #ef5350; }
+  .deploy {
+    display: flex; align-items: center; gap: 8px; align-self: center;
+    font-size: 12px; font-weight: 600; color: #8696a0; white-space: nowrap;
+    background: rgba(32,44,51,.55); border: 1px solid #223038;
+    border-radius: 999px; padding: 7px 14px; max-width: 100%; overflow: hidden;
+  }
+  .deploy .dot {
+    width: 8px; height: 8px; border-radius: 50%; flex: none;
+    background: #25d366; box-shadow: 0 0 8px rgba(37,211,102,.65);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 50% { opacity: .35; } }
   .card {
     background: #111b21; border: 1px solid #223038; border-radius: 16px;
     padding: 20px; display: flex; flex-direction: column; gap: 14px;
@@ -142,6 +154,11 @@ const dashboardHtml = `<!doctype html>
     </div>
     <span class="pill" id="pill">connecting…</span>
   </header>
+
+  <div class="deploy" id="deployBadge">
+    <span class="dot"></span>
+    <span id="deployText">reading build info…</span>
+  </div>
 
   <section class="card" id="pairCard" hidden>
     <div id="codeView">
@@ -266,6 +283,10 @@ const dashboardHtml = `<!doctype html>
     document.getElementById("botName").textContent = state.name || "DamzD";
     document.getElementById("subtitle").textContent = (state.ownerName ? state.ownerName + "'s " : "") + "personal assistant";
     document.title = (state.name || "DamzD") + " — dashboard";
+    var booted = state.bootedAt ? new Date(state.bootedAt) : null;
+    var bt = booted ? ("0" + booted.getHours()).slice(-2) + ":" + ("0" + booted.getMinutes()).slice(-2) : "—";
+    document.getElementById("deployText").textContent =
+      "running v" + (state.appVersion || "?") + " · booted " + bt + " · up " + fmt(state.uptimeSeconds);
     var pill = document.getElementById("pill");
     var pair = document.getElementById("pairCard");
     var wait = document.getElementById("waitCard");

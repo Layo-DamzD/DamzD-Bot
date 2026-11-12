@@ -367,6 +367,7 @@ export class DamzDBot {
       qrMode: !!this.qrMode,
       resetting: !!this.resetting,
       uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
+      bootedAt: this.startedAt,
       commands: this.commands.length,
       accessMode: appConfig.accessMode,
       aiBrain: hasAIBrain(),
