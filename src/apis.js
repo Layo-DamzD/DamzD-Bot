@@ -372,17 +372,33 @@ export async function generateImage(prompt) {
   return buffer;
 }
 
+function looksLikeMp3(buffer) {
+  if (!buffer || buffer.byteLength < 4) return false;
+  if (buffer.subarray(0, 3).toString("latin1") === "ID3") return true;
+  return buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0; // MPEG frame sync
+}
+
 export async function ttsAudio(text, language = "en") {
   const clean = String(text || "").trim();
   if (!clean) throw new Error("give me the text to read out");
   const spoken = clean.slice(0, 200);
   const url = "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=" +
     encodeURIComponent(language) + "&q=" + encodeURIComponent(spoken);
-  const buffer = await fetchBuffer(url, {
+  const opts = {
     timeoutMs: 45000,
     label: "text-to-speech service",
     headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
-  });
+  };
+  // The free endpoint occasionally answers with an error page instead of
+  // audio when it is rate limiting. Never let fake audio through — one calm
+  // retry, then an honest error the owner can act on.
+  let buffer = await fetchBuffer(url, opts);
+  if (!looksLikeMp3(buffer)) {
+    buffer = await fetchBuffer(url, opts);
+    if (!looksLikeMp3(buffer)) {
+      throw new Error("the voice service refused me just now — try again in a minute");
+    }
+  }
   return { buffer, truncated: clean.length > 200 };
 }
 

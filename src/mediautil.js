@@ -68,3 +68,17 @@ export function toStickerWebp(buffer, { isVideo = false, durationSeconds = 6 } =
 export function videoToMp3(buffer) {
   return convert(buffer, "in.mp4", "out.mp3", ["-vn", "-b:a", "128k"]);
 }
+
+// WhatsApp voice notes must be OGG/Opus. An MP3 sent as ptt arrives as a
+// "voice note" bubble that most phones refuse to play ("something is wrong
+// with the audio file"). Opus 64k mono is close to what WhatsApp itself
+// records at, so the note plays and streams like any native voice message.
+export function toVoiceOgg(buffer) {
+  return convert(buffer, "in.mp3", "out.ogg", [
+    "-vn",
+    "-c:a", "libopus",
+    "-b:a", "64k",
+    "-vbr", "on",
+    "-application", "voip"
+  ]);
+}

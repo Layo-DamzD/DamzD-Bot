@@ -1,5 +1,6 @@
 import { generateImage, ttsAudio, transcribeAudio } from "../src/apis.js";
 import { fetchBuffer } from "../src/apis.js";
+import { toVoiceOgg } from "../src/mediautil.js";
 
 async function quotedVoiceBuffer(ctx) {
   const info = ctx.msg.message?.extendedTextMessage?.contextInfo;
@@ -56,7 +57,16 @@ export default [
       }
       await ctx.typing(900);
       const { buffer, truncated } = await ttsAudio(text, language);
-      await ctx.send({ audio: buffer, mimetype: "audio/mpeg", ptt: true, fileName: "tts.mp3" });
+      try {
+        // A true voice note is OGG/Opus. The service returns MP3 — without
+        // conversion the note arrives broken ("wrong with the audio file").
+        const voice = await toVoiceOgg(buffer);
+        await ctx.send({ audio: voice, mimetype: "audio/ogg; codecs=opus", ptt: true });
+      } catch {
+        // Host without ffmpeg: a plain audio clip still plays everywhere —
+        // a broken voice note never does.
+        await ctx.send({ audio: buffer, mimetype: "audio/mpeg", fileName: "tts.mp3", ptt: false });
+      }
       if (truncated) {
         await ctx.reply("I read the first 200 characters — that is the limit per voice note.");
       }
