@@ -1,4 +1,4 @@
-import { config as appConfig } from "../src/config.js";
+import { config as appConfig, setAccessMode } from "../src/config.js";
 
 export default [
   {
@@ -10,9 +10,8 @@ export default [
       if (!ctx.isOwner) throw new Error("this is an owner command");
       const wanted = String(ctx.args || "").trim().toLowerCase();
       if (wanted === "public" || wanted === "self") {
-        process.env.ACCESS_MODE = wanted;
-        Object.defineProperty(appConfig, "accessMode", { value: wanted, configurable: false });
-        await ctx.reply("Done — I will now respond to " + (wanted === "self" ? "you only." : "everyone."));
+        const now = setAccessMode(wanted);
+        await ctx.reply("Done — I will now respond to " + (now === "self" ? "you only." : "everyone."));
         return;
       }
       await ctx.reply(
@@ -28,8 +27,7 @@ export default [
     description: "let everyone use commands",
     run: async ctx => {
       if (!ctx.isOwner) throw new Error("this is an owner command");
-      Object.defineProperty(appConfig, "accessMode", { value: "public", configurable: false });
-      process.env.ACCESS_MODE = "public";
+      setAccessMode("public");
       await ctx.reply("Public mode on — everyone can use my commands now.");
     }
   },
@@ -40,8 +38,7 @@ export default [
     description: "restrict commands to you",
     run: async ctx => {
       if (!ctx.isOwner) throw new Error("this is an owner command");
-      Object.defineProperty(appConfig, "accessMode", { value: "self", configurable: false });
-      process.env.ACCESS_MODE = "self";
+      setAccessMode("self");
       await ctx.reply("Private mode on — only you can use my commands now.");
     }
   },

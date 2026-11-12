@@ -22,15 +22,26 @@ export function addRuntimeOwner(number) {
   }
 }
 
-const accessMode = String(process.env.ACCESS_MODE || "self").trim().toLowerCase() === "public"
+// Access mode lives in a plain mutable binding: the .mode / .public /
+// .private owner commands flip it at runtime through setAccessMode(). It used
+// to sit frozen inside the config object and every attempt to redefine it
+// threw "Cannot redefine property" — the commands looked like they worked but
+// always answered with an error.
+let accessMode = String(process.env.ACCESS_MODE || "self").trim().toLowerCase() === "public"
   ? "public"
   : "self";
+
+export function setAccessMode(mode) {
+  accessMode = mode === "public" ? "public" : "self";
+  process.env.ACCESS_MODE = accessMode;
+  return accessMode;
+}
 
 export const config = Object.freeze({
   name: String(process.env.BOT_NAME || "DamzD").trim() || "DamzD",
   ownerName: String(process.env.OWNER_NAME || "Boss").trim() || "Boss",
   ownerNumbers: Object.freeze(ownerNumbers),
-  accessMode,
+  get accessMode() { return accessMode; },
   prefix: String(process.env.PREFIX || ".").slice(0, 3) || ".",
   sessionDirectory: String(process.env.SESSION_DIR || "./auth").trim() || "./auth",
   dataDirectory: String(process.env.DATA_DIR || "./data").trim() || "./data",

@@ -111,7 +111,7 @@ Endpoints: `/` dashboard · `/status` live JSON feeding it · `/health` liveness
 DamzD ships with a `render.yaml` blueprint and exposes `GET /health` (port `PORT`, default 3000).
 
 1. Push this repo to GitHub. On [render.com](https://render.com): **New → Web Service → Build and deploy from a Git repository** and pick the repo. Render reads `render.yaml` automatically — otherwise set: runtime **Node**, build `npm install`, start `npm start`.
-2. Fill in the environment variables when prompted: `OWNER_NUMBER` (e.g. `2348000000000`), `OWNER_NAME`, `GROQ_API_KEY`, `ACCESS_MODE=self`.
+2. Fill in the environment variables when prompted: `OWNER_NUMBER` (e.g. `2348000000000`), `OWNER_NAME`, `GROQ_API_KEY`. `ACCESS_MODE` ships as `public` in `render.yaml` — set it to `self` in the dashboard if you want the bot to answer you only. You can also flip live anytime with the `.public` / `.private` owner commands.
 3. First boot: open **your app URL** (or the Logs tab) — the pairing code shows on the dashboard and refreshes itself until used. On your phone: **WhatsApp → Settings → Linked devices → Link a device → "Link with phone number instead"**, type the code.
 4. **Keep it awake** — free Render services sleep after ~15 minutes without HTTP traffic. Create a free monitor at [uptimerobot.com](https://uptimerobot.com) or cron-job.org hitting `https://<your-app>.onrender.com/health` every 5–10 minutes and DamzD stays online 24/7.
 5. **Free-tier caveat** — the disk is wiped on every restart/redeploy, so `auth/` is lost and you re-pair (new code appears in the logs). A paid instance with a persistent disk keeps the session forever.
@@ -124,7 +124,7 @@ DamzD ships with a `render.yaml` blueprint and exposes `GET /health` (port `PORT
 | `BOT_NAME` | DamzD | how the bot introduces itself |
 | `OWNER_NAME` | DamzD | the bot calls you this |
 | `OWNER_NUMBER` | *(empty)* | international format, no `+`; empty = first paired number owns the bot |
-| `ACCESS_MODE` | self | `self` = owner only, `public` = everyone |
+| `ACCESS_MODE` | self | `self` = owner only, `public` = everyone (render.yaml ships `public`; flip live with `.public` / `.private`) |
 | `PREFIX` | `.` | command prefix (`.setprefix` also works live) |
 | `AUTO_DL` | true | auto-fetch media when a social link is sent |
 | `GROQ_API_KEY` | *(empty)* | free AI key, recommended |

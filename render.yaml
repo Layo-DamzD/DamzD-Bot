@@ -25,7 +25,7 @@ services:
       # one per request) so a dead code is always visible on the dashboard. Set a
       # fixed 8-char A-Z0-9 value here only if you really want a constant code.
       - key: ACCESS_MODE
-        value: self
+        value: public
       - key: PREFIX
         value: "."
       - key: AUTO_DL
