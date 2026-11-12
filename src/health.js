@@ -140,6 +140,30 @@ const dashboardHtml = `<!doctype html>
   }
   .stat span { font-size: 19px; font-weight: 700; color: #e9edef; }
   .stat small { font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase; color: #8696a0; }
+  .sess {
+    display: flex; align-items: center; gap: 10px;
+    background: #0b141a; border: 1px solid #223038; border-radius: 12px;
+    padding: 10px 12px; font-size: 13px;
+  }
+  .sess .num { font-weight: 700; color: #e9edef; }
+  .sess .st { font-size: 11.5px; color: #8696a0; flex: 1; min-width: 100px; text-align: right; }
+  .sess .st.ok { color: #25d366; }
+  .sess .st.warn { color: #f5a623; }
+  .sesscode {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 26px; font-weight: 700; letter-spacing: 5px; color: #25d366;
+    background: #0b141a; border: 1px dashed #2a3942; border-radius: 10px;
+    padding: 9px 8px 9px 13px; text-align: center; user-select: all; width: 100%;
+  }
+  .sessbtn {
+    border: 1px solid rgba(239,83,80,.45); border-radius: 8px; padding: 7px 10px;
+    background: rgba(239,83,80,.08); color: #ef5350; font-weight: 700; font-size: 12px; cursor: pointer; flex: none;
+  }
+  .sessbtn:disabled { opacity: .5; cursor: wait; }
+  .sesscopy {
+    border: 1px solid #2a3942; border-radius: 8px; padding: 7px 10px;
+    background: #202c33; color: #25d366; font-weight: 700; font-size: 12px; cursor: pointer; width: 100%;
+  }
   footer { margin-top: 10px; font-size: 12px; color: #66787f; text-align: center; }
   @media (min-width: 480px) { .code { font-size: 40px; } }
 </style>
@@ -229,6 +253,17 @@ const dashboardHtml = `<!doctype html>
     </div>
   </section>
 
+  <section class="card" id="sessionsCard" hidden>
+    <p class="label">other WhatsApps on this bot</p>
+    <div id="sessionList" style="display:flex;flex-direction:column;gap:10px;"></div>
+    <div class="divider">connect another WhatsApp</div>
+    <div class="numrow">
+      <input id="sessInput" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="2348012345678">
+      <button id="sessBtn">Connect</button>
+    </div>
+    <p class="hint">Each connected WhatsApp becomes its own <b>private bot</b> on this server — commands answer only to that phone, and its chat is nobody else's business. The friend connects from <b>their own phone</b>: WhatsApp → Settings → Linked devices → Link with phone number, then types the code shown here. On free hosting about 2 extra phones fit alongside the main bot.</p>
+  </section>
+
   <footer>DamzD • linked-device bot • no ads, no footers</footer>
 </div>
 <script>
@@ -287,6 +322,7 @@ const dashboardHtml = `<!doctype html>
     var bt = booted ? ("0" + booted.getHours()).slice(-2) + ":" + ("0" + booted.getMinutes()).slice(-2) : "—";
     document.getElementById("deployText").textContent =
       "running v" + (state.appVersion || "?") + " · booted " + bt + " · up " + fmt(state.uptimeSeconds);
+    renderSessions();
     var pill = document.getElementById("pill");
     var pair = document.getElementById("pairCard");
     var wait = document.getElementById("waitCard");
@@ -327,6 +363,37 @@ const dashboardHtml = `<!doctype html>
       var input = document.getElementById("pairInput");
       if (!input.value && state.pairingNumber) input.placeholder = state.pairingNumber;
     }
+  }
+  function renderSessions() {
+    var card = document.getElementById("sessionsCard");
+    var sessions = (state && state.sessions) || null;
+    if (!sessions) { card.hidden = true; return; }
+    card.hidden = false;
+    var full = state.sessionsMax > 0 && sessions.length >= state.sessionsMax;
+    document.getElementById("sessInput").disabled = full;
+    var btn = document.getElementById("sessBtn");
+    btn.disabled = full;
+    if (btn.dataset.resting !== "1") btn.textContent = full ? "All slots used" : "Connect";
+    var list = document.getElementById("sessionList");
+    if (!sessions.length) {
+      list.innerHTML = "<p class='hint' style='margin:0'>Nobody else is connected yet — type a number below to give that phone its own private bot on this server.</p>";
+      return;
+    }
+    list.innerHTML = sessions.map(function (s) {
+      var num = escapeHtml("+" + (s.number || ""));
+      var disc = "<button class='sessbtn' data-disc='" + num.slice(1) + "'>Disconnect</button>";
+      if (s.connected) {
+        return "<div class='sess'><span class='num'>" + num + "</span><span class='st ok'>✅ linked · up " + fmt(s.uptimeSeconds) + (s.appVersion ? " · v" + escapeHtml(s.appVersion) : "") + "</span>" + disc + "</div>";
+      }
+      if (s.pairingCode && !s.stale) {
+        var age = parseInt(s.pairingCodeAgeSeconds, 10);
+        var left = isNaN(age) ? 60 : Math.max(0, 60 - age);
+        return "<div class='sess'><span class='num'>" + num + "</span><span class='st warn'>waiting for that phone · code dies in " + left + "s</span>" + disc + "</div>" +
+          "<div class='sesscode'>" + escapeHtml(s.pairingCode) + "</div>" +
+          "<button class='sesscopy' data-copy='" + escapeHtml(s.pairingCode) + "'>Copy code for " + num + "</button>";
+      }
+      return "<div class='sess'><span class='num'>" + num + "</span><span class='st " + (s.stale ? "warn" : "") + "'>" + (s.stale ? "restarting…" : "starting up — the pairing code lands in a few seconds…") + "</span>" + disc + "</div>";
+    }).join("");
   }
   async function tick() {
     try {
@@ -417,12 +484,54 @@ const dashboardHtml = `<!doctype html>
     if (state) { state.pairingCode = null; state.qr = null; }
     setTimeout(function () { btn.disabled = false; btn.textContent = "Start completely over ↻"; }, 12000);
   });
+  document.getElementById("sessBtn").addEventListener("click", async function () {
+    var btn = document.getElementById("sessBtn");
+    var input = document.getElementById("sessInput");
+    var digits = input.value.replace(/\D/g, "");
+    if (!digits) { btn.textContent = "Type a number"; setTimeout(function () { btn.textContent = "Connect"; }, 2000); return; }
+    btn.disabled = true; btn.dataset.resting = "1"; btn.textContent = "Starting…";
+    try {
+      var r = await fetch("/sessions/connect", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ number: digits })
+      });
+      var j = await r.json();
+      if (j && j.ok) { input.value = ""; btn.textContent = "Starting ✓ — code below soon"; }
+      else { btn.textContent = (j && j.error ? j.error : "failed").slice(0, 26); }
+    } catch (e) { btn.textContent = "failed — retry"; }
+    setTimeout(function () {
+      btn.disabled = false; btn.dataset.resting = ""; btn.textContent = "Connect";
+    }, 4000);
+  });
+  document.getElementById("sessionList").addEventListener("click", async function (ev) {
+    var t = ev.target;
+    if (!t.dataset) return;
+    if (t.dataset.copy) {
+      var code = t.dataset.copy;
+      var done = function () { t.textContent = "Copied ✓"; setTimeout(function () { t.textContent = "Copy code"; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(code).then(done, done); } else { done(); }
+      return;
+    }
+    if (t.dataset.disc) {
+      var number = t.dataset.disc;
+      if (!confirm("Disconnect +" + number + "? Their bot is stopped and its WhatsApp link is wiped.")) return;
+      t.disabled = true; t.textContent = "Removing…";
+      try {
+        await fetch("/sessions/disconnect", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ number: number })
+        });
+      } catch (e) { /* the next poll will resync */ }
+    }
+  });
 </script>
 </body>
 </html>
 `;
 
-export function startHealthServer(bot, port) {
+export function startHealthServer(bot, port, sessions = null) {
   const server = http.createServer(async (request, response) => {
     const url = (request.url || "/").split("?")[0];
     if (url === "/health") {
@@ -432,7 +541,38 @@ export function startHealthServer(bot, port) {
     }
     if (url === "/status") {
       response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-      response.end(JSON.stringify(bot.status()));
+      const payload = bot.status();
+      if (sessions) {
+        payload.sessions = sessions.readStatuses();
+        payload.sessionsMax = sessions.maxSessions;
+      }
+      response.end(JSON.stringify(payload));
+      return;
+    }
+    if (url === "/sessions/connect" && request.method === "POST" && sessions) {
+      let body = "";
+      for await (const chunk of request) {
+        body += chunk;
+        if (body.length > 2000) { request.destroy(); return; }
+      }
+      let number = "";
+      try { number = String(JSON.parse(body).number || ""); } catch { number = ""; }
+      const result = await sessions.connect(number);
+      response.writeHead(result.ok ? 200 : 400, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end(JSON.stringify(result));
+      return;
+    }
+    if (url === "/sessions/disconnect" && request.method === "POST" && sessions) {
+      let body = "";
+      for await (const chunk of request) {
+        body += chunk;
+        if (body.length > 2000) { request.destroy(); return; }
+      }
+      let number = "";
+      try { number = String(JSON.parse(body).number || ""); } catch { number = ""; }
+      const result = await sessions.disconnect(number);
+      response.writeHead(result.ok ? 200 : 400, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end(JSON.stringify(result));
       return;
     }
     if (url === "/pairing/request" && request.method === "POST") {

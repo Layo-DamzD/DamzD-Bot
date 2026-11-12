@@ -1,13 +1,13 @@
 {
   "name": "damzd-bot",
-  "version": "1.4.14",
+  "version": "1.4.15",
   "private": true,
   "description": "DamzD \u2014 a personal WhatsApp assistant that chats like a human and runs clean commands. No footers, no ads, no spam.",
   "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "check": "node --check index.js && node --check src/config.js && node --check src/flags.js && node --check src/lidmap.js && node --check src/utils.js && node --check src/memory.js && node --check src/store.js && node --check src/cache.js && node --check src/apis.js && node --check src/mediautil.js && node --check src/ai.js && node --check src/downloads.js && node --check src/context.js && node --check src/loader.js && node --check src/runtime.js && node --check src/hooks.js && node --check src/health.js && node --check commands/general.js && node --check commands/ai.js && node --check commands/news.js && node --check commands/media.js && node --check commands/downloads.js && node --check commands/group.js && node --check commands/fun.js && node --check commands/games.js && node --check commands/tools.js && node --check commands/privacy.js && node --check commands/status.js && node --check commands/channel.js && node --check commands/owner.js && node --check test/smoke.js",
+    "check": "node --check index.js && node --check src/config.js && node --check src/flags.js && node --check src/lidmap.js && node --check src/utils.js && node --check src/memory.js && node --check src/store.js && node --check src/cache.js && node --check src/apis.js && node --check src/mediautil.js && node --check src/ai.js && node --check src/downloads.js && node --check src/context.js && node --check src/loader.js && node --check src/runtime.js && node --check src/sessions.js && node --check src/hooks.js && node --check src/health.js && node --check commands/general.js && node --check commands/ai.js && node --check commands/news.js && node --check commands/media.js && node --check commands/downloads.js && node --check commands/group.js && node --check commands/fun.js && node --check commands/games.js && node --check commands/tools.js && node --check commands/privacy.js && node --check commands/status.js && node --check commands/channel.js && node --check commands/owner.js && node --check test/smoke.js",
     "test": "node test/smoke.js"
   },
   "engines": {
