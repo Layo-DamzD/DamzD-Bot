@@ -385,10 +385,10 @@ function looksLikeMp3(buffer) {
 // to Google further down.
 const TTS_VOICE = String(process.env.TTS_VOICE || "en-NG-EzinneNeural");
 
-async function neuralVoice(text) {
+async function neuralVoice(text, voiceName) {
   const { MsEdgeTTS, OUTPUT_FORMAT } = await import("msedge-tts");
   const tts = new MsEdgeTTS();
-  await tts.setMetadata(TTS_VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+  await tts.setMetadata(voiceName || TTS_VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
   const { audioStream } = tts.toStream(text);
   const chunks = [];
   for await (const chunk of audioStream) chunks.push(chunk);
@@ -397,11 +397,20 @@ async function neuralVoice(text) {
   return buffer;
 }
 
-export async function ttsAudio(text, language = "en") {
+export async function ttsAudio(text, language = "en", voice = "") {
   const clean = String(text || "").trim();
   if (!clean) throw new Error("give me the text to read out");
   const spoken = clean.slice(0, 200);
   const truncated = clean.length > 200;
+
+  // An explicit voice choice (.tts abeo | ...) always goes to the Edge neural
+  // engine first — that is where the voice personality lives. Google still
+  // catches the fall if the neural service refuses.
+  if (voice) {
+    try {
+      return { buffer: await neuralVoice(spoken, voice), truncated };
+    } catch { /* Edge refused or rate-limited — Google still speaks below */ }
+  }
 
   // Human neural voice first for English — this is the voice people hear.
   if (String(language).startsWith("en")) {

@@ -111,7 +111,11 @@ export default [
         "Memory: " + Math.round(process.memoryUsage().heapUsed / 1048576) + " MB\n" +
         "Node: " + process.version + "\n" +
         "Paired as: " + (ctx.sock?.user?.id || "unknown") + "\n" +
-        "Groq key: " + (appConfig.groq.apiKey ? "set" : "not set") + "\n" +
+        "AI brain: " + (appConfig.childMode
+          ? (appConfig.groq.apiKey ? "Groq (child bot)" : "Groq — no key set (child bot)")
+          : (appConfig.puterTokens.length
+            ? "Puter flagships (" + appConfig.puterTokens.length + (appConfig.puterTokens.length === 1 ? " account" : " accounts") + ")"
+            : "no Puter token — keyless services only")) + "\n" +
         "OpenRouter key: " + (appConfig.openrouter.apiKey ? "set" : "not set")
       );
     }
@@ -120,7 +124,7 @@ export default [
     name: "ban",
     hidden: true,
     category: "Owner",
-    description: "block a user from using me",
+    description: "block a user from using me (a connected friend's whole bot gets stopped)",
     run: async ctx => {
       if (!ctx.isOwner) throw new Error("this is an owner command");
       const info = ctx.msg.message?.extendedTextMessage?.contextInfo;
@@ -128,6 +132,15 @@ export default [
         ? String(info.participant).split("@")[0]
         : String(ctx.args || "").replace(/[^0-9]/g, "");
       if (!number) throw new Error("mention the person or send their number");
+      // A number that connected their own WhatsApp to this server runs its own
+      // bot process — banning it stops that whole bot until .unban, which is
+      // stronger than any per-chat ban.
+      if (ctx.sessions?.has(number)) {
+        const result = ctx.sessions.ban(number);
+        if (!result.ok) throw new Error(result.error);
+        await ctx.reply("🚫 +" + result.number + " is banned — their connected bot is stopped and will not start again until you send .unban " + result.number);
+        return;
+      }
       const banned = ctx.store.get("banned", []);
       if (!banned.includes(number)) banned.push(number);
       ctx.store.set("banned", banned);
@@ -138,11 +151,17 @@ export default [
     name: "unban",
     hidden: true,
     category: "Owner",
-    description: "unblock a banned user",
+    description: "unblock a banned user (revives a banned friend's bot)",
     run: async ctx => {
       if (!ctx.isOwner) throw new Error("this is an owner command");
       const number = String(ctx.args || "").replace(/[^0-9]/g, "");
       if (!number) throw new Error("send the number to unban");
+      if (ctx.sessions?.has(number)) {
+        const result = ctx.sessions.unban(number);
+        if (!result.ok) throw new Error(result.error);
+        await ctx.reply("✅ +" + result.number + " is unbanned — their bot is starting again with the same WhatsApp link, no fresh pairing needed.");
+        return;
+      }
       const banned = ctx.store.get("banned", []).filter(item => item !== number);
       ctx.store.set("banned", banned);
       await ctx.reply("+" + number + " can use me again.");

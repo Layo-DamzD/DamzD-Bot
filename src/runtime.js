@@ -24,6 +24,77 @@ import { resolveJidNumber } from "./lidmap.js";
 
 const MAX_PROCESSED_IDS = 2000;
 const AI_COOLDOWN_MS = 2500;
+
+// ── Receptionist mode ────────────────────────────────────────────────────────
+// She used to hold full AI conversations with anyone who messaged — even with
+// the same person the owner was texting himself, because his own outgoing
+// messages arrive here too (linked device). That made her an amebo: you type
+// to a friend and she chats over you. Now she works like a receptionist:
+//   · greetings get a warm one-liner that says the owner will reply soon
+//   · questions get "the owner will attend once he is free"
+//   · everything else gets silence
+// Only the owner's deliberate chat with the bot (the "Message yourself" chat)
+// and explicit commands still reach the AI brain.
+const OWNER_ACTIVE_WINDOW_MS = 10 * 60 * 1000;
+
+function ownerRecentlyActive(deps, jid) {
+  const at = deps.ownerActivity?.get(jid) || 0;
+  return Boolean(at) && Date.now() - at < OWNER_ACTIVE_WINDOW_MS;
+}
+
+// The bot's own account chat ("Message yourself") — the one conversation
+// where texting the bot is deliberate.
+function isSelfChat(sock, jid) {
+  const ids = [sock?.user?.id, sock?.user?.lid].filter(Boolean).map(String);
+  return ids.includes(jid);
+}
+
+const GREETING_PATTERN = /^(good\s*(morning|afternoon|evening|night)|how\s*far+|howfar|hfa|how\s*na+h?|wetin\s*dey(\s*happen)?|how\s*are\s*you|how\s*you\s*dey|how\s*u\s*dey|how\s*body|what'?s?\s*up|was+up|was+ap|wa+sup|hi+|hey+|hel+o+|hallo|yo+|gm|ga|ge|gn|morning|afternoon|evening|good\s*am)\b/;
+
+function isGreetingText(raw) {
+  const cleaned = String(raw || "").toLowerCase().replace(/[^a-z'\s]/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned || cleaned.split(" ").length > 6) return false;
+  return GREETING_PATTERN.test(cleaned);
+}
+
+function isQuestionText(raw) {
+  const cleaned = String(raw || "").toLowerCase().replace(/[^a-z'\s?]/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned) return false;
+  if (cleaned.includes("?")) return true;
+  return /^(who|what|where|when|why|which|whose|how|can|could|would|will|shall|should|do|does|did|is|are|am|was|were|wetin|shey|abi|abeg)\b/.test(cleaned);
+}
+
+function pickReply(list) {
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+const GREETING_REPLIES = [
+  "Hello! 👋 DamzD will attend to you when he is free.",
+  "Hey! 😊 He is tied up at the moment — he will reply you shortly.",
+  "Hi there! DamzD will get back to you once he is free.",
+  "Hello! Noted — he will reach you when he is less busy."
+];
+const QUESTION_REPLIES = [
+  "DamzD will attend once he is free. 🙏",
+  "He is busy right now — he will answer you as soon as he is free.",
+  "Noted. DamzD will attend to you once he is free. 👍",
+  "DamzD will get back to you on this once he is free."
+];
+
+async function sendReceptionistReply(deps, ctx, rawText) {
+  // Somebody pinged the bot while the owner is present in this chat: stay out
+  // of it — that conversation belongs to him.
+  if (ownerRecentlyActive(deps, ctx.jid)) return;
+  // Same per-chat pacing as the AI brain so a burst of messages gets one reply.
+  if (!canUseAI(ctx.jid)) return;
+  let reply = null;
+  if (isGreetingText(rawText)) reply = pickReply(GREETING_REPLIES);
+  else if (isQuestionText(rawText)) reply = pickReply(QUESTION_REPLIES);
+  if (!reply) return; // not a greeting, not a question — say nothing
+  markAIUsed(ctx.jid);
+  await ctx.typing(Math.min(2200, 500 + reply.length * 10));
+  await ctx.reply(reply);
+}
 // Pairing codes expire in roughly a minute, and every new request kills the
 // previous one. A fixed code string hid that rotation — the dashboard always
 // showed the same 8 characters, so a person could keep typing a code that was
@@ -197,9 +268,19 @@ export async function processMessage(deps, sock, msg) {
   const text = messageText(msg.message);
   if (!text) return;
 
-  const ctx = createContext({ sock, msg, config: appConfig, store: deps.store, memory: deps.memory });
+  const ctx = createContext({ sock, msg, config: appConfig, store: deps.store, memory: deps.memory, sessions: deps.sessions || null });
   ctx.commands = deps.commands || [];
   if (!ctx.isOwner && deps.store.get("banned", []).includes(ctx.senderNumber)) return;
+
+  // The owner's own outgoing texts mark him as ACTIVE in this chat. While he
+  // is around, the receptionist stays completely silent — no answering his
+  // friends on his behalf while he is right there typing.
+  if (msg.key.fromMe && deps.ownerActivity) {
+    deps.ownerActivity.set(jid, Date.now());
+    if (deps.ownerActivity.size > 400) {
+      deps.ownerActivity.delete(deps.ownerActivity.keys().next().value);
+    }
+  }
 
   // Pause gate. The hard pause (flags.js) never even starts the socket, so
   // this branch handles the soft pause: she stays connected but ignores
@@ -257,6 +338,10 @@ export async function processMessage(deps, sock, msg) {
       return;
     }
     if (!ctx.isGroup) {
+      // The "unknown command" hint is for the owner's own chat with the bot.
+      // A "..." or ".5k" typed to a friend is conversation, not a command
+      // session — she used to answer that into the friend's chat.
+      if (msg.key.fromMe && !isSelfChat(sock, jid)) return;
       await ctx.reply(
         "I do not know that command yet. " + appConfig.prefix + "menu shows everything I understand."
       );
@@ -267,7 +352,16 @@ export async function processMessage(deps, sock, msg) {
 
   if (jid.endsWith("@s.whatsapp.net") || jid.endsWith("@lid")) {
     if (await handleLink(ctx, text)) return;
-    await sendAIReply(ctx, text);
+    // The amebo fix: the owner's outgoing texts to other people used to be
+    // treated as prompts and she would chat over him. Only the deliberate
+    // "Message yourself" chat with the bot still gets the full assistant.
+    if (msg.key.fromMe && !isSelfChat(sock, jid)) return;
+    if (ctx.isOwner) {
+      await sendAIReply(ctx, text);
+      return;
+    }
+    // Everyone else gets the receptionist, not a conversation.
+    await sendReceptionistReply(deps, ctx, text);
     return;
   }
 
@@ -277,9 +371,13 @@ export async function processMessage(deps, sock, msg) {
       const handled = await handleLink(ctx, text);
       if (handled) return;
     }
-    // She answers when mentioned — and in self mode the owner never needs to
-    // mention her at all: anything he writes in a group is for her too.
-    if (isBotMention(ctx, msg) || ctx.isOwner) {
+    // Groups: she speaks only when mentioned. The owner's ordinary group chat
+    // is never treated as a prompt — that is how she used to talk over him.
+    if (isBotMention(ctx, msg)) {
+      if (!ctx.isOwner) {
+        await sendReceptionistReply(deps, ctx, text.replace(/@\S+/g, " ").trim() || "Hello!");
+        return;
+      }
       const cleaned = text.replace(/@\S+/g, " ").replace(appConfig.prefix + "\\S+", "").trim() || "Hello!";
       const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
       const quotedContent = quoted ? messageText(quoted) : "";
@@ -291,12 +389,14 @@ export async function processMessage(deps, sock, msg) {
 }
 
 export class DamzDBot {
-  constructor({ commands, lookup, memory, store }) {
+  constructor({ commands, lookup, memory, store, sessions = null }) {
     this.commands = commands;
     this.lookup = lookup;
     this.memory = memory;
     this.store = store;
+    this.sessions = sessions;
     this.processed = new Set();
+    this.ownerActivity = new Map(); // chat jid -> last time the owner texted there
     this.sock = null;
     this.connected = false;
     this.pairingCode = null;
@@ -544,10 +644,12 @@ export class DamzDBot {
           }
           await processMessage({
             processed: this.processed,
+            ownerActivity: this.ownerActivity,
             store: this.store,
             memory: this.memory,
             lookup: this.lookup,
-            commands: this.commands
+            commands: this.commands,
+            sessions: this.sessions
           }, sock, msg);
         } catch (error) {
           console.error("[" + appConfig.name + "] message error:", error?.message);

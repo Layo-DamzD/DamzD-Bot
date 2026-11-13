@@ -29,9 +29,10 @@ services:
       - key: ACCESS_MODE
         value: self
       # How many EXTRA WhatsApps friends may connect alongside the main one,
-      # each with its own private bot. Free tier RAM fits about 2.
+      # each with its own private bot. Five is the cap — if all slots run at
+      # once on the smallest free tier, give the service more RAM.
       - key: MAX_SESSIONS
-        value: "2"
+        value: "5"
       - key: PREFIX
         value: "."
       - key: AUTO_DL
@@ -42,9 +43,10 @@ services:
       # downloads. Songs via .song work without it (JioSaavn engine).
       - key: NABEES_API_KEY
         sync: false
-      # Optional: the owner's free Puter account token unlocks the REAL
-      # flagship brains — .claude (Claude Sonnet), .chatgpt (GPT) and
-      # .gemini (Gemini) — through puter.ai.chat. Without it those commands
-      # fall back to the built-in chain automatically.
+      # Optional: free Puter account tokens unlock the REAL flagship brains —
+      # .claude (Claude Sonnet), .chatgpt (GPT) and .gemini (Gemini) — through
+      # puter.ai.chat. Paste ONE token, or SEVERAL separated by commas: calls
+      # rotate through them round-robin and a rate-limited account is skipped.
+      # Without them those commands fall back to the built-in chain.
       - key: PUTER_AUTH_TOKEN
         sync: false

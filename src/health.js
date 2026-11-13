@@ -149,6 +149,7 @@ const dashboardHtml = `<!doctype html>
   .sess .st { font-size: 11.5px; color: #8696a0; flex: 1; min-width: 100px; text-align: right; }
   .sess .st.ok { color: #25d366; }
   .sess .st.warn { color: #f5a623; }
+  .sess .st.err { color: #ff5b5b; }
   .sesscode {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 26px; font-weight: 700; letter-spacing: 5px; color: #25d366;
@@ -382,6 +383,11 @@ const dashboardHtml = `<!doctype html>
     list.innerHTML = sessions.map(function (s) {
       var num = escapeHtml("+" + (s.number || ""));
       var disc = "<button class='sessbtn' data-disc='" + num.slice(1) + "'>Disconnect</button>";
+      // Ban and Unban live in chat only: .ban <number> / .unban <number> from
+      // the owner's WhatsApp. The dashboard shows the status read-only.
+      if (s.banned) {
+        return "<div class='sess'><span class='num'>" + num + "</span><span class='st err'>🚫 banned — their bot is off and will not start (unban with .unban " + num.slice(1) + " in chat)</span>" + disc + "</div>";
+      }
       if (s.connected) {
         return "<div class='sess'><span class='num'>" + num + "</span><span class='st ok'>✅ linked · up " + fmt(s.uptimeSeconds) + (s.appVersion ? " · v" + escapeHtml(s.appVersion) : "") + "</span>" + disc + "</div>";
       }

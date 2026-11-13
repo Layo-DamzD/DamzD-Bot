@@ -1,7 +1,7 @@
 import { numberFromJid } from "./utils.js";
 import { isOwnerNumber } from "./config.js";
 
-export function createContext({ sock, msg, config, store, memory }) {
+export function createContext({ sock, msg, config, store, memory, sessions = null }) {
   const key = msg.key;
   const jid = String(key.remoteJid || "");
   const isGroup = jid.endsWith("@g.us");
@@ -31,6 +31,7 @@ export function createContext({ sock, msg, config, store, memory }) {
     config,
     store,
     memory,
+    sessions, // the multi-connect manager (main bot only) — lets .ban stop a connected friend's whole bot
     jid,
     isGroup,
     sender,

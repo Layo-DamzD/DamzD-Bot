@@ -27,7 +27,7 @@ function normalizeNumber(raw, countryCode) {
 }
 
 export class SessionManager {
-  constructor({ dataDirectory, entryPath, maxSessions = 2 }) {
+  constructor({ dataDirectory, entryPath, maxSessions = 5 }) {
     this.root = path.join(path.resolve(dataDirectory), "sessions");
     this.registryPath = path.join(path.resolve(dataDirectory), "sessions.json");
     this.entryPath = path.resolve(entryPath);
@@ -83,6 +83,9 @@ export class SessionManager {
 
   spawn(digits) {
     if (this.children.has(digits)) return;
+    // A banned friend keeps their registration and pairing but never gets a
+    // process again until the owner unbans them from the dashboard.
+    if (this.#entries().some(entry => String(entry.number) === digits && entry.bannedAt)) return;
     const { auth, data } = this.#sessionDir(digits);
     fs.mkdirSync(auth, { recursive: true });
     fs.mkdirSync(data, { recursive: true });
@@ -180,6 +183,48 @@ export class SessionManager {
     return { ok: true, number: digits };
   }
 
+  // Is this number one of the connected friend sessions? Accepts any format
+  // the owner might type (local 0803… or international 234803…) and normalizes
+  // the same way connect/ban/unban do.
+  has(rawNumber) {
+    const digits = normalizeNumber(rawNumber, this.countryCode);
+    return this.#entries().some(entry => String(entry.number) === digits);
+  }
+
+  // Owner's kill switch for a connected friend: their bot process is stopped
+  // and never respawns, but the registration and WhatsApp link are kept — so
+  // unbanning brings their bot straight back without a fresh pairing.
+  ban(rawNumber) {
+    const digits = normalizeNumber(rawNumber, this.countryCode);
+    const registered = this.#entries();
+    const entry = registered.find(item => String(item.number) === digits);
+    if (!entry) return { ok: false, error: "+" + digits + " is not connected here" };
+    if (entry.bannedAt) return { ok: false, error: "+" + digits + " is already banned" };
+    entry.bannedAt = new Date().toISOString();
+    this.#saveRegistry(registered);
+    const child = this.children.get(digits);
+    if (child) {
+      child.stopping = true; // a ban is not a crash — no auto-restart
+      try { child.child.kill("SIGTERM"); } catch { /* already gone */ }
+      this.children.delete(digits);
+    }
+    console.log("[sessions] +" + digits + " banned — their bot is stopped");
+    return { ok: true, number: digits, banned: true };
+  }
+
+  unban(rawNumber) {
+    const digits = normalizeNumber(rawNumber, this.countryCode);
+    const registered = this.#entries();
+    const entry = registered.find(item => String(item.number) === digits);
+    if (!entry) return { ok: false, error: "+" + digits + " is not connected here" };
+    if (!entry.bannedAt) return { ok: false, error: "+" + digits + " is not banned" };
+    delete entry.bannedAt;
+    this.#saveRegistry(registered);
+    this.spawn(digits); // the auth folder survived the ban — it relinks on its own
+    console.log("[sessions] +" + digits + " unbanned — bot starting again");
+    return { ok: true, number: digits };
+  }
+
   stopAll() {
     for (const [digits, entry] of this.children) {
       entry.stopping = true;
@@ -190,7 +235,9 @@ export class SessionManager {
   // Dashboard payload: one row per registered session, live state from the
   // child's own status file (the child rewrites it every 3 seconds).
   readStatuses() {
-    return this.list().map(digits => {
+    return this.#entries().map(entry => {
+      const digits = String(entry.number || "");
+      const banned = Boolean(entry.bannedAt);
       const statusPath = path.join(this.root, digits, "status.json");
       let status = null;
       let stale = false;
@@ -201,12 +248,13 @@ export class SessionManager {
       const alive = this.children.has(digits);
       return {
         number: digits,
-        connected: stale ? false : Boolean(status?.connected),
-        pairingCode: stale ? null : (status?.pairingCode || null),
-        pairingNumber: stale ? null : (status?.pairingNumber || null),
-        pairingCodeAgeSeconds: stale ? null : (status?.pairingCodeAgeSeconds ?? null),
-        uptimeSeconds: stale ? 0 : Math.max(0, Math.floor(status?.uptimeSeconds || 0)),
-        appVersion: status?.appVersion || null,
+        banned,
+        connected: banned || stale ? false : Boolean(status?.connected),
+        pairingCode: banned || stale ? null : (status?.pairingCode || null),
+        pairingNumber: banned || stale ? null : (status?.pairingNumber || null),
+        pairingCodeAgeSeconds: banned || stale ? null : (status?.pairingCodeAgeSeconds ?? null),
+        uptimeSeconds: banned || stale ? 0 : Math.max(0, Math.floor(status?.uptimeSeconds || 0)),
+        appVersion: banned ? null : (status?.appVersion || null),
         stale,
         starting: alive && !stale && !status
       };

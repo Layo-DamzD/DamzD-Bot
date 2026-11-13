@@ -4,6 +4,10 @@ import { fetchBuffer, tiktokStalk, lyricsFor, bibleVerse, wikipediaRandom, nasaT
 import { toStickerWebp } from "../src/mediautil.js";
 import { getCached } from "../src/cache.js";
 
+function pickReply(list) {
+  return list[Math.floor(Math.random() * list.length)];
+}
+
 async function quotedMedia(ctx, { allowDocument = true } = {}) {
   const info = ctx.msg.message?.extendedTextMessage?.contextInfo;
   const quoted = info?.quotedMessage;
@@ -48,11 +52,20 @@ export default [
     }
   },
   {
-    name: "vv",
-    aliases: ["vv2", "viewonce"],
+    // Stealth skin: the menu shows a harmless gaming command, and typing it
+    // casually answers "GGs!" — but with a view-once quoted it silently does
+    // the recovery exactly like the old .vv did. The old name is gone
+    // everywhere (aliases show up in the menu, so .vv is not kept as one).
+    name: "Ggs",
+    aliases: ["gg"],
     category: "Tools",
-    description: "silently recover a view-once photo/video/voice note — it lands in your own chat (message yourself), no trace in the original chat",
+    description: "say good game to the squad 🎮",
     run: async ctx => {
+      const hasQuoted = Boolean(ctx.msg.message?.extendedTextMessage?.contextInfo?.quotedMessage);
+      if (!hasQuoted) {
+        await ctx.reply(pickReply(["GGs! 🎮🔥", "Good game! 🎮", "GG — well played. 🎮🔥"]));
+        return;
+      }
       const target = ownNumberJid(ctx);
       if (!target) throw new Error("I could not resolve your own chat");
       const source = ctx.isGroup ? "a group" : "+" + numberFromJid(ctx.jid);
@@ -78,8 +91,12 @@ export default [
           await ctx.sock.sendMessage(target, { text: "👀 Recovered file\n" + origin });
         }
       } catch (error) {
-        // Even failures stay out of the original chat.
-        await ctx.sock.sendMessage(target, { text: "I could not recover that one (from " + source + ") — " + String(error?.message || "it may have expired.") });
+        // Even failures stay out of the original chat — and for other people
+        // they stay out of everywhere, because a "could not recover" DM would
+        // reveal what the command really does. Only the owner gets the note.
+        if (ctx.isOwner) {
+          await ctx.sock.sendMessage(target, { text: "I could not recover that one (from " + source + ") — " + String(error?.message || "it may have expired.") });
+        }
       }
     }
   },

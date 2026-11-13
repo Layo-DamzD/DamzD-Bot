@@ -5,6 +5,10 @@
 process.env.OWNER_NUMBER = "2348000000001";
 process.env.ACCESS_MODE = "self";
 process.env.GROQ_API_KEY = "test-key";
+// The suite runs as a child bot: children run on Groq (the split from
+// v1.4.19), and the Groq mock below stands in for that brain. The main bot's
+// Puter/Groq split is asserted separately in its own check.
+process.env.DAMZD_CHILD = "1";
 process.env.DATA_DIR = "./test/.tmp-data";
 
 const sent = [];
@@ -34,6 +38,7 @@ globalThis.fetch = async (url, options = {}) => {
 };
 
 const { loadCommands, buildLookup, resolveCommandInput } = await import("../src/loader.js");
+const { setAccessMode } = await import("../src/config.js");
 const { ChatMemory } = await import("../src/memory.js");
 const { JsonStore, ANTILINK_ON } = await import("../src/store.js");
 const { processMessage } = await import("../src/runtime.js");
@@ -74,7 +79,7 @@ function textMessage(text, overrides = {}) {
   };
 }
 
-const deps = { processed: new Set(), store, memory, lookup, commands };
+const deps = { processed: new Set(), ownerActivity: new Map(), store, memory, lookup, commands };
 const firstText = () => sent.map(item => item.content?.text || "").find(Boolean) || "";
 let passed = 0;
 async function check(label, fn) {
@@ -153,30 +158,72 @@ await check("honest fun commands stay wired after the anime and fake-generator r
   }
 });
 
-await check("unknown command in DM gets a gentle suggestion", async () => {
+await check(".Ggs is the harmless gaming skin", async () => {
+  assert.equal(lookup.get("ggs")?.name, "Ggs", "ggs command exists");
+  assert.ok(!lookup.has("vv"), "vv is fully gone");
+  assert.ok(!lookup.has("viewonce"), "viewonce alias is gone too");
   sent.length = 0;
-  await processMessage(deps, ownerSock, textMessage(".frobnicate"));
-  assert.match(firstText(), /do not know that command/);
+  await processMessage(deps, ownerSock, textMessage(".Ggs"));
+  assert.match(firstText(), /GG|good game/i);
 });
 
-await check("plain DM text goes to the AI brain with memory", async () => {
+await check(".Ggs, .ggs and .gg all reach the recovery command (case-insensitive)", async () => {
+  for (const typed of [".Ggs", ".ggs", ".gg", ".GGS", ".GG"]) {
+    const parsed = resolveCommandInput(typed, ".");
+    // the exact spelling lowercases into "ggs" or the "gg" alias — both keys
+    // must land on the same Ggs command
+    assert.ok(["ggs", "gg"].includes(parsed.name), typed + " parses to a known key");
+    assert.equal(lookup.get(parsed.name)?.name, "Ggs", typed + " routes to the Ggs command");
+  }
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".ggs"));
+  assert.match(firstText(), /GG|good game/i);
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".gg"));
+  assert.match(firstText(), /GG|good game/i);
+});
+
+await check("unknown command gets a gentle suggestion only in the bot's own chat", async () => {
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".frobnicate", { jid: ownerSock.user.id }));
+  assert.match(firstText(), /do not know that command/);
+  // In a friend's chat even a typo'd command stays invisible — a "..." typed
+  // to a friend must never make her talk.
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".frobnicate", { jid: "2348000000009@s.whatsapp.net" }));
+  assert.equal(sent.length, 0, "unknown commands are silent in other people's chats");
+});
+
+await check("the owner's text to a friend is NEVER answered (the amebo fix)", async () => {
   sent.length = 0;
   groqCalls.length = 0;
-  await processMessage(deps, ownerSock, textMessage("Hello, how are you today?"));
+  const friendChat = "2348000000009@s.whatsapp.net";
+  await processMessage(deps, ownerSock, textMessage("Hello, how are you today?", { jid: friendChat }));
+  await processMessage(deps, ownerSock, textMessage("I will call you later", { jid: friendChat, id: "FRIEND2" }));
+  assert.equal(sent.length, 0, "his own conversations must stay untouched");
+  assert.equal(groqCalls.length, 0, "no AI calls for his outgoing texts");
+});
+
+await check("the owner's chat with the bot itself still gets the full assistant", async () => {
+  sent.length = 0;
+  groqCalls.length = 0;
+  const selfChat = ownerSock.user.id;
+  await processMessage(deps, ownerSock, textMessage("Hello, how are you today?", { jid: selfChat }));
   assert.ok(groqCalls.length === 1, "groq should have been called");
   assert.match(groqCalls[0].model, /llama/);
   assert.match(groqCalls[0].messages[0].content, /DamzD/);
   assert.ok(!/How may I assist you today/.test(groqCalls[0].messages[0].content));
   assert.match(sent.at(-1).content.text, /Good evening/);
   assert.ok(presence.some(item => item.type === "composing"), "should show typing first");
-  assert.equal(memory.history("2348000000001@s.whatsapp.net").length, 2, "user + assistant stored");
+  assert.equal(memory.history(selfChat).length, 2, "user + assistant stored");
 });
 
 await check("AI replies use memory context on follow-ups", async () => {
   sent.length = 0;
   groqCalls.length = 0;
   await new Promise(resolve => setTimeout(resolve, 2600));
-  await processMessage(deps, ownerSock, textMessage("What did I just ask you?"));
+  const selfChat = ownerSock.user.id;
+  await processMessage(deps, ownerSock, textMessage("What did I just ask you?", { jid: selfChat }));
   const lastUser = groqCalls[0].messages.filter(m => m.role === "user").at(-1).content;
   assert.equal(lastUser, "What did I just ask you?");
   const previousUser = groqCalls[0].messages.filter(m => m.role === "user").at(0).content;
@@ -195,6 +242,48 @@ await check("self mode ignores non-owner messages completely", async () => {
   assert.equal(groqCalls.length, 0);
 });
 
+await check("public mode receptionist greets greetings with a short line", async () => {
+  setAccessMode("public");
+  sent.length = 0;
+  groqCalls.length = 0;
+  const fan = "2348666000005@s.whatsapp.net";
+  await processMessage(deps, nonOwnerSock, textMessage("Good morning", { jid: fan, fromMe: false }));
+  const reply = sent.map(item => item.content?.text || "").find(Boolean) || "";
+  assert.match(reply, /DamzD will attend|will reply you|will get back to you|will reach you when he is less busy/);
+  assert.equal(groqCalls.length, 0, "greetings never wake the AI brain");
+});
+
+await check("public mode receptionist answers questions with 'will attend once free'", async () => {
+  sent.length = 0;
+  groqCalls.length = 0;
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  const fan2 = "2348666000006@s.whatsapp.net";
+  await processMessage(deps, nonOwnerSock, textMessage("What is the plan for today?", { jid: fan2, fromMe: false }));
+  const reply = sent.map(item => item.content?.text || "").find(Boolean) || "";
+  assert.match(reply, /once he is free|as soon as he is free/);
+  assert.equal(groqCalls.length, 0, "questions get the receptionist, not the AI");
+});
+
+await check("public mode receptionist stays silent for ordinary chatter", async () => {
+  sent.length = 0;
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  const fan3 = "2348666000007@s.whatsapp.net";
+  await processMessage(deps, nonOwnerSock, textMessage("lol ok na", { jid: fan3, fromMe: false }));
+  assert.equal(sent.length, 0, "no amebo — no reply to ordinary chatter");
+});
+
+await check("receptionist goes quiet while the owner is present in that chat", async () => {
+  sent.length = 0;
+  groqCalls.length = 0;
+  const friendChat = "2348000000009@s.whatsapp.net";
+  // The owner is right there texting his friend…
+  await processMessage(deps, ownerSock, textMessage("I dey come", { jid: friendChat, id: "ACTIVE1" }));
+  // …so even a greeting from the friend gets no receptionist reply.
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  await processMessage(deps, nonOwnerSock, textMessage("hello o", { jid: friendChat, fromMe: false }));
+  assert.equal(sent.length, 0, "owner is present — she says nothing");
+});
+
 await check("link sent in DM auto-downloads without a command", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage("check this out https://www.tiktok.com/@user/video/123"));
@@ -202,7 +291,7 @@ await check("link sent in DM auto-downloads without a command", async () => {
   assert.ok(kinds.includes("video"), "should send the video");
 });
 
-await check("group mention wakes the AI", async () => {
+await check("group mention wakes the AI for the owner", async () => {
   sent.length = 0;
   groqCalls.length = 0;
   groupMeta = {
@@ -227,13 +316,35 @@ await check("group mention wakes the AI", async () => {
   assert.match(sent.at(-1).content.text, /Good evening/);
 });
 
-await check("owner's plain group message wakes the AI without a mention", async () => {
+await check("owner's plain group message no longer wakes the AI", async () => {
   sent.length = 0;
   groqCalls.length = 0;
   await new Promise(resolve => setTimeout(resolve, 2600));
   await processMessage(deps, ownerSock, textMessage("anyone watching the match?", { jid: "123@g.us" }));
-  assert.ok(groqCalls.length === 1, "owner never needs to mention her in groups");
-  assert.match(sent.at(-1).content.text, /Good evening/);
+  assert.equal(groqCalls.length, 0, "his group chat is conversation, not a prompt");
+  assert.equal(sent.length, 0, "and she does not talk over him");
+});
+
+await check("non-owner group mention gets the receptionist in public mode", async () => {
+  sent.length = 0;
+  groqCalls.length = 0;
+  // The owner left the group more than 10 minutes ago — simulate that here,
+  // because earlier checks in this file had him texting in the same group.
+  deps.ownerActivity.delete("123@g.us");
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  const ping = textMessage("@2348000000002 who is this?", { jid: "123@g.us", fromMe: false });
+  ping.key.participant = "2348555000009@s.whatsapp.net";
+  ping.message = {
+    extendedTextMessage: {
+      text: "@2348000000002 who is this?",
+      contextInfo: { mentionedJid: ["2348000000002@s.whatsapp.net"] }
+    }
+  };
+  await processMessage(deps, nonOwnerSock, ping);
+  const reply = sent.map(item => item.content?.text || "").find(Boolean) || "";
+  assert.match(reply, /he is free/);
+  assert.equal(groqCalls.length, 0);
+  setAccessMode("self");
 });
 
 await check("non-owner group message without mention stays quiet", async () => {
@@ -242,7 +353,7 @@ await check("non-owner group message without mention stays quiet", async () => {
   const bystander = textMessage("anyone watching the match?", { jid: "123@g.us", fromMe: false });
   bystander.key.participant = "2348555000009@s.whatsapp.net";
   await processMessage(deps, nonOwnerSock, bystander);
-  assert.equal(groqCalls.length, 0, "only the owner can wake her in self mode");
+  assert.equal(groqCalls.length, 0, "only mentions can wake her in groups");
   assert.equal(sent.length, 0);
 });
 
@@ -298,6 +409,126 @@ await check("calc handles arithmetic safely", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".calc process.exit(1)"));
   assert.match(firstText(), /did not work/);
+});
+
+await check("the AI auto-router sends each task to the right flagship", async () => {
+  const { classifyTask, routeTask } = await import("../src/ai.js");
+  assert.equal(classifyTask("write a function to reverse a linked list in javascript"), "code");
+  assert.equal(routeTask("fix this bug in my python script")[0], "gpt-6-astra", "code goes to Astra");
+  assert.equal(classifyTask("solve 12 * 9 + 45 step by step"), "math");
+  assert.equal(routeTask("what is the integral of x^2")[0], "gpt-6.1-sol", "maths goes to Sol");
+  assert.equal(classifyTask("tell me a bedtime story about a lion"), "creative");
+  assert.equal(routeTask("write a poem for my mum")[0], "claude-fable-5-2", "creative writing goes to Fable");
+  assert.equal(classifyTask("translate good morning to yoruba"), "translate");
+  assert.equal(routeTask("how do you say thank you in french")[0], "gpt-6-luna", "translation goes to fast Luna");
+  assert.equal(routeTask("who is the president of france")[0], "gpt-6.1-sol", "general chat goes to Sol");
+  assert.equal(lookup.get("chatgpt")?.brains?.[0], "auto", ".chatgpt uses the auto router");
+  for (const name of ["astra", "sol", "terra", "fable"]) {
+    assert.ok(lookup.has(name), "missing flagship command: " + name);
+  }
+  assert.equal(lookup.get("astra")?.brains?.[0], "puter-model:gpt-6-astra", ".astra hits the real model");
+  assert.equal(lookup.get("claude")?.brains?.[0], "puter-model:claude-opus-5-5", ".claude hits Opus 5.5");
+  assert.equal(lookup.get("gemini")?.brains?.[0], "puter-model:gemini-4-argon", ".gemini hits Gemini 4 Argon");
+});
+
+await check("session ban — a banned friend's bot stops and unban revives it", async () => {
+  const path = await import("node:path");
+  const os = await import("node:os");
+  const { SessionManager } = await import("../src/sessions.js");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "damzd-ban-"));
+  const dummy = path.join(tmp, "dummy.js"); // a child that just sleeps — no real bot boots in tests
+  fs.writeFileSync(dummy, "setTimeout(function(){}, 6e10);");
+  const mgr = new SessionManager({ dataDirectory: tmp, entryPath: dummy });
+  assert.equal(mgr.maxSessions, 5, "default cap is now 5 slots");
+  await mgr.connect("08010000001"); // local format — normalized against the owner's country code
+  assert.ok(mgr.children.has("2348010000001"), "friend session spawned");
+  const banned = mgr.ban("2348010000001");
+  assert.ok(banned.ok, "ban succeeds");
+  assert.equal(mgr.children.has("2348010000001"), false, "their bot is stopped on ban");
+  assert.equal(mgr.readStatuses().find(row => row.number === "2348010000001").banned, true, "dashboard sees the ban");
+  assert.equal(mgr.ban("2348010000001").ok, false, "double ban is rejected");
+  mgr.spawn("2348010000001");
+  assert.equal(mgr.children.has("2348010000001"), false, "a banned number never respawns");
+  assert.ok(mgr.unban("2348010000001").ok, "unban succeeds");
+  assert.ok(mgr.children.has("2348010000001"), "their bot comes back after unban");
+  assert.equal(mgr.unban("2348010000001").ok, false, "unban of a non-banned number is rejected");
+  assert.equal(mgr.ban("2348099999999").ok, false, "ban of an unconnected number is rejected");
+  mgr.stopAll();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+await check(".ban from chat stops a connected friend's bot and .unban revives it", async () => {
+  const path = await import("node:path");
+  const os = await import("node:os");
+  const { SessionManager } = await import("../src/sessions.js");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "damzd-ban-cmd-"));
+  const dummy = path.join(tmp, "dummy.js");
+  fs.writeFileSync(dummy, "setTimeout(function(){}, 6e10);");
+  const mgr = new SessionManager({ dataDirectory: tmp, entryPath: dummy });
+  await mgr.connect("08010000003");
+  deps.sessions = mgr; // the main bot carries the session manager for owner commands
+  try {
+    sent.length = 0;
+    // local number format typed by the owner — has() must normalize it
+    await processMessage(deps, ownerSock, textMessage(".ban 08010000003"));
+    assert.match(firstText(), /banned — their connected bot is stopped/);
+    assert.equal(mgr.children.has("2348010000003"), false, "their bot process is dead");
+    assert.equal(mgr.readStatuses().find(row => row.number === "2348010000003").banned, true, "registry shows the ban");
+    // while banned, .ban again reports the friendly error, not a crash
+    sent.length = 0;
+    await processMessage(deps, ownerSock, textMessage(".ban 08010000003"));
+    assert.match(firstText(), /already banned/);
+    // unbanning from chat brings the bot back
+    sent.length = 0;
+    await processMessage(deps, ownerSock, textMessage(".unban 08010000003"));
+    assert.match(firstText(), /unbanned — their bot is starting again/);
+    assert.ok(mgr.children.has("2348010000003"), "their bot respawned");
+    // a number that never connected falls through to the per-chat user ban
+    sent.length = 0;
+    await processMessage(deps, ownerSock, textMessage(".ban 2348111122222"));
+    assert.match(firstText(), /banned from using me/);
+    sent.length = 0;
+    await processMessage(deps, ownerSock, textMessage(".unban 2348111122222"));
+    assert.match(firstText(), /can use me again/);
+  } finally {
+    delete deps.sessions;
+    mgr.stopAll();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+await check("the AI split — main bot never sees Groq, children run on Groq only", async () => {
+  const saved = process.env.DAMZD_CHILD;
+  // Main bot mode (fresh module instance via the query-string cache buster):
+  // Groq key is stripped no matter what the environment says, Puter accounts
+  // arrive deduped, and the bot counts as having a brain through Puter.
+  process.env.DAMZD_CHILD = "";
+  process.env.PUTER_AUTH_TOKEN = "tok-a, tok-b ,tok-a";
+  const mainMod = await import("../src/config.js?main");
+  assert.equal(mainMod.childMode, false);
+  assert.equal(mainMod.config.groq.apiKey, "", "main bot must never carry a Groq key");
+  assert.deepEqual(mainMod.config.puterTokens, ["tok-a", "tok-b"], "Puter accounts deduped");
+  assert.equal(mainMod.hasAIBrain(), true, "main bot has a brain via Puter");
+  // Child mode: Groq is the brain, Puter is empty — friends never burn the
+  // owner's Puter quota.
+  process.env.DAMZD_CHILD = "1";
+  const childMod = await import("../src/config.js?child");
+  assert.equal(childMod.childMode, true);
+  assert.equal(childMod.config.groq.apiKey, "test-key", "children run on Groq");
+  assert.equal(childMod.config.puterTokens.length, 0, "children never touch Puter");
+  assert.equal(childMod.hasAIBrain(), true, "child bot has a brain via Groq");
+  process.env.DAMZD_CHILD = saved;
+  delete process.env.PUTER_AUTH_TOKEN;
+});
+
+await check(".voices lists the AI voices .tts can speak with", async () => {
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".voices"));
+  const reply = firstText();
+  assert.match(reply, /tts ezinne/i);
+  assert.match(reply, /abeo/i);
+  assert.match(reply, /Nigerian/);
+  assert.match(reply, /British/);
 });
 
 await check("no reply text ever contains promotional content", async () => {

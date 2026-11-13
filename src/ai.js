@@ -1,4 +1,4 @@
-import { config, hasAIBrain } from "./config.js";
+import { config, hasAIBrain, childMode, puterTokens } from "./config.js";
 
 export { hasAIBrain };
 
@@ -150,19 +150,23 @@ async function callNabeesAI(chat) {
   throw new Error("the backup AI services had nothing to say. Try again in a moment.");
 }
 
-// Puter — the owner's free Puter account (PUTER_AUTH_TOKEN) unlocks the REAL
-// flagship models: Claude, GPT and Gemini, through puter.ai.chat. The SDK is
-// imported lazily so the bot still boots fine before the package or token
-// exists — that brain simply sleeps and the standard chain answers instead.
-let puterClient = null;
-async function getPuter() {
-  const token = String(process.env.PUTER_AUTH_TOKEN || "").trim();
-  if (!token) throw new Error("no-key");
-  if (!puterClient) {
+// Puter — the owner's free Puter accounts (PUTER_AUTH_TOKEN) unlock the REAL
+// flagship models: Claude, GPT and Gemini, through puter.ai.chat. Several
+// accounts can be supplied comma-separated; calls rotate through them
+// round-robin and an account that fails (rate limit, asleep) is skipped for
+// that request. The SDK is imported lazily so the bot still boots fine before
+// the package or token exists — that brain simply sleeps and the standard
+// chain answers instead.
+// The owner's Puter tokens come from config (they are empty on child bots —
+// children run on Groq only, the main bot on Puter flagships).
+let puterCursor = 0;
+const puterClients = new Map();
+async function getPuterFor(token) {
+  if (!puterClients.has(token)) {
     const { init } = await import("@heyputer/puter.js/src/init.cjs");
-    puterClient = init(token);
+    puterClients.set(token, init(token));
   }
-  return puterClient;
+  return puterClients.get(token);
 }
 
 function puterText(result) {
@@ -177,15 +181,83 @@ function puterText(result) {
 }
 
 async function callPuterModel(chat, model) {
-  const puter = await getPuter();
-  const answer = await Promise.race([
-    puter.ai.chat(chat, { model }),
-    new Promise((_resolve, reject) =>
-      setTimeout(() => reject(new Error("the Puter model took too long")), 90000))
-  ]);
-  const text = puterText(answer);
-  if (!text) throw new Error("the Puter model had nothing to say.");
-  return stripThinking(text);
+  if (!puterTokens.length) throw new Error("no-key");
+  let lastError = null;
+  for (let attempt = 0; attempt < puterTokens.length; attempt++) {
+    const token = puterTokens[(puterCursor + attempt) % puterTokens.length];
+    try {
+      const puter = await getPuterFor(token);
+      const answer = await Promise.race([
+        puter.ai.chat(chat, { model }),
+        new Promise((_resolve, reject) =>
+          setTimeout(() => reject(new Error("the Puter model took too long")), 90000))
+      ]);
+      const text = puterText(answer);
+      if (!text) throw new Error("the Puter model had nothing to say.");
+      // Success — the next call starts from the next account so the load and
+      // the per-account free quotas spread evenly.
+      puterCursor = (puterCursor + attempt + 1) % puterTokens.length;
+      return stripThinking(text);
+    } catch (error) {
+      lastError = error;
+      continue; // that account failed — try the next one on this same request
+    }
+  }
+  throw lastError || new Error("the Puter models are quiet right now.");
+}
+
+// The latest flagships on Puter, each one probed live through puter.ai.chat
+// with a plain shorthand name (13 Nov 2026 — all twelve answered "OK").
+const PUTER_LATEST = {
+  astra: "gpt-6-astra",         // GPT-6 Astra — the strongest coding brain
+  sol: "gpt-6.1-sol",           // GPT-6.1 Sol — newest general flagship, deep reasoning
+  terra: "gpt-6.1-terra",       // GPT-6.1 Terra — the third 6.1 flavour
+  luna: "gpt-6-luna",           // GPT-6 Luna — fast, light, great for quick answers
+  opus: "claude-opus-5-5",      // Claude Opus 5.5 — Anthropic's biggest
+  sonnet: "claude-sonnet-5-5",  // Claude Sonnet 5.5 — the fast Claude
+  fable: "claude-fable-5-2",    // Claude Fable 5.2 — Anthropic's storyteller family
+  argon: "gemini-4-argon",      // Gemini 4 Argon — Google's newest flagship
+  flash: "gemini-3.8-flash"     // Gemini 3.8 Flash — the quick Gemini
+};
+
+// The auto-router: read the question, decide what KIND of task it is, and
+// send it to the brain that is best at that kind — Astra for code (the
+// owner's pick), Sol for maths and general questions, Fable for stories and
+// creative writing, Luna when speed matters more than depth. Every route
+// keeps a fallback ladder under it so a sleeping model never dead-ends.
+const TASK_ROUTES = {
+  code: [PUTER_LATEST.astra, PUTER_LATEST.sol, PUTER_LATEST.luna],
+  math: [PUTER_LATEST.sol, PUTER_LATEST.astra, PUTER_LATEST.luna],
+  creative: [PUTER_LATEST.fable, PUTER_LATEST.sol, PUTER_LATEST.luna],
+  translate: [PUTER_LATEST.luna, PUTER_LATEST.sol, PUTER_LATEST.astra],
+  chat: [PUTER_LATEST.sol, PUTER_LATEST.astra, PUTER_LATEST.luna]
+};
+
+export function classifyTask(prompt) {
+  const text = String(prompt || "").toLowerCase();
+  if (/(translate|translation|how do (you|i) say|what does .* mean in |in (yoruba|igbo|hausa|pidgin|french|spanish|german|arabic|chinese|japanese)\b)/.test(text)) return "translate";
+  if (/(```|function\b|debug|bug\b|error\b|stack ?trace|code\b|coding|program|script\b|javascript|typescript|python\b|java\b|c\+\+|c#|php\b|sql\b|html\b|css\b|react\b|node\.?js|api\b|regex|algorithm|compile|npm\b|git\b|json\b|class \w|array\b|loop\b|variable|database|syntax)/.test(text)) return "code";
+  if (/(solve|calculate|equation|arithmetic|\bmath|algebra|geometry|percentage|integral|derivative|probability|\d+\s*[+\-*/^×÷]\s*\d+)/.test(text)) return "math";
+  if (/(story|poem|poetry|write me|write a|essay|lyrics|joke|caption|slogan|speech|imagine|roleplay|novel|rhyme|fairytale|fairy tale|bedtime)/.test(text)) return "creative";
+  return "chat";
+}
+
+export function routeTask(prompt) {
+  return TASK_ROUTES[classifyTask(prompt)] || TASK_ROUTES.chat;
+}
+
+// Walk a route's model ladder on Puter until one answers. Shared by the
+// "auto" brain, the per-model commands and the main bot's standard chain.
+async function runPuterRoute(chat, route) {
+  let routeError = null;
+  for (const model of route) {
+    try {
+      return await callPuterModel(chat, model);
+    } catch (error) {
+      routeError = error;
+    }
+  }
+  throw routeError || new Error("no model on the route answered");
 }
 
 // Named brains for the per-model commands (.chatgpt, .llama, .luna, .deepseek).
@@ -193,9 +265,9 @@ async function callPuterModel(chat, model) {
 // name. When a brain is unavailable (no key yet, sleeping service) askAI
 // quietly continues down the standard chain, so a command never dead-ends.
 const BRAINS = {
-  "puter-claude": chat => callPuterModel(chat, "claude-sonnet-4-6"),
-  "puter-gpt": chat => callPuterModel(chat, "gpt-5.4-nano"),
-  "puter-gemini": chat => callPuterModel(chat, "gemini-3.1-flash-lite"),
+  "puter-claude": chat => callPuterModel(chat, PUTER_LATEST.sonnet),
+  "puter-gpt": chat => callPuterModel(chat, PUTER_LATEST.luna),
+  "puter-gemini": chat => callPuterModel(chat, PUTER_LATEST.flash),
   groq: async chat => {
     if (!config.groq.apiKey) throw new Error("no-key");
     return callOpenAICompatible({
@@ -248,6 +320,18 @@ export async function askAI({ messages, ownerName, style, brains } = {}) {
             }
           });
         }
+        // "puter-model:<id>" — one specific Puter model, e.g. .astra sends
+        // "puter-model:gpt-6-astra". Fails over to the next brain on error.
+        if (typeof brain === "string" && brain.startsWith("puter-model:")) {
+          return await callPuterModel(chat, brain.slice("puter-model:".length));
+        }
+        // "auto" — the smart router: classify the question, then walk the
+        // route's model ladder. If every model on the route fails, throw so
+        // the next brain (or the standard chain below) takes over.
+        if (brain === "auto") {
+          const lastUser = [...chat].reverse().find(message => message.role === "user");
+          return await runPuterRoute(chat, routeTask(lastUser?.content));
+        }
         const run = BRAINS[brain];
         if (run) return await run(chat);
       } catch {
@@ -256,7 +340,37 @@ export async function askAI({ messages, ownerName, style, brains } = {}) {
     }
   }
   const failures = [];
-  if (config.groq.apiKey) {
+  // The AI split, applied to every plain chat (no explicit brain): the main
+  // bot reads the question and sends it to the best Puter flagship, with
+  // OpenRouter and the keyless services underneath — never Groq. A child bot
+  // starts at Groq and never touches Puter or OpenRouter.
+  if (!childMode) {
+    if (puterTokens.length) {
+      try {
+        const lastUser = [...chat].reverse().find(message => message.role === "user");
+        return await runPuterRoute(chat, routeTask(lastUser?.content));
+      } catch (error) {
+        failures.push(error?.message);
+      }
+    }
+    if (config.openrouter.apiKey) {
+      try {
+        return await callOpenAICompatible({
+          url: config.openrouter.url,
+          apiKey: config.openrouter.apiKey,
+          model: config.openrouter.model,
+          messages: chat,
+          label: "backup AI service",
+          extraHeaders: {
+            "HTTP-Referer": "https://damzd.local",
+            "X-Title": config.name
+          }
+        });
+      } catch (error) {
+        failures.push(error?.message);
+      }
+    }
+  } else if (config.groq.apiKey) {
     try {
       return await callOpenAICompatible({
         url: config.groq.url,
@@ -264,23 +378,6 @@ export async function askAI({ messages, ownerName, style, brains } = {}) {
         model: config.groq.model,
         messages: chat,
         label: "AI service"
-      });
-    } catch (error) {
-      failures.push(error?.message);
-    }
-  }
-  if (config.openrouter.apiKey) {
-    try {
-      return await callOpenAICompatible({
-        url: config.openrouter.url,
-        apiKey: config.openrouter.apiKey,
-        model: config.openrouter.model,
-        messages: chat,
-        label: "backup AI service",
-        extraHeaders: {
-          "HTTP-Referer": "https://damzd.local",
-          "X-Title": config.name
-        }
       });
     } catch (error) {
       failures.push(error?.message);
