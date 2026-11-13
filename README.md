@@ -56,14 +56,17 @@ On your phone: **WhatsApp → Settings → Linked devices → Link a device → 
 
 ## AI brain (all free)
 
-| Layer | Key needed | Notes |
-|---|---|---|
-| Groq (llama-3.3-70b) | `GROQ_API_KEY` — free at [console.groq.com](https://console.groq.com) | fast, smart, recommended |
-| OpenRouter (backup) | `OPENROUTER_API_KEY` — free tier | used if Groq fails |
-| Pollinations (keyless) | none | always-on fallback, so the bot chats even with zero keys |
-| NABEES AI (GPT-5 Luna / DeepSeek) | `NABEES_API_KEY` — free | last-resort brain; same key powers video downloads |
+The bots are split by design: the **main bot chats on Puter's flagships** (GPT-6 family, Claude, Gemini — no Groq at all), while **child bots (friends' connected sessions) run on Groq only**, so five friends can never burn the owner's quotas.
 
-Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_KEY`.
+| Layer | Key needed | Who uses it |
+|---|---|---|
+| Puter flagships (GPT-6, Claude, Gemini) | `PUTER_AUTH_TOKEN` — free | main bot only — auto-routes every plain chat to the best brain for the task |
+| Groq (llama-3.3-70b) | `GROQ_API_KEY` — free at [console.groq.com](https://console.groq.com) | child bots only (their chat brain) |
+| OpenRouter (backup) | `OPENROUTER_API_KEY` — free tier | main bot, if Puter is absent |
+| Pollinations (keyless) | none | both, always-on fallback |
+| NABEES AI (GPT-5 Luna / DeepSeek) | `NABEES_API_KEY` — free | both, last-resort brain |
+
+Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_KEY`. That is the one place the main bot still touches Groq: there is no free alternative to Whisper, and transcription has a separate quota from chat.
 
 ## Optional keys
 
@@ -75,7 +78,7 @@ Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_K
 
 - **🤖 General** — menu, ping, alive, owner card (.vcf), time/date, jid, version
 - **💬 AI & Chat** — `.ai` plus **real per-model brains**: `.chatgpt` (smart auto-router — picks the best GPT-6 brain for the task: Astra for code, Sol for maths & general, Luna for quick answers), `.astra`, `.sol`, `.terra` and `.luna` (the GPT-6 family directly), `.claude` (Claude Opus 5.5), `.fable` (Claude Fable 5.2, the storyteller), `.gemini` (Gemini 4 Argon), `.llama` (real Llama 3.3 70B on Groq) and `.deepseek` (DeepSeek V4 Flash via the NABEES studio) — plus styled companions `.grok`, `.qwen`, `.fable5`, `.wormgpt`, `.mathgpt`, `.aidetect`, `.translate`. Real brains are labelled real; styles are labelled styles — never passed off as models they are not
-- **🎨 AI Media** — `.flux` image generation, `.tts` voice notes, `.vn2text` transcription, `.ssweb` screenshots
+- **🎨 AI Media** — `.flux` image generation, `.tts` voice notes with AI voices (`.voices` lists them: Nigerian Ezinne & Abeo, plus American and British accents), `.vn2text` transcription, `.ssweb` screenshots
 - **📰 News** — BBC, CNN, Al Jazeera, Guardian, Punch Nigeria and 9 more desks
 - **📥 Downloads** — `.song`/`.play` send **full songs** (real-artist verification: the engine identifies the official recording via Apple's catalogue, pulls the verified track from JioSaavn at up to 320kbps and never passes a cover or karaoke version off as the song; for tracks JioSaavn's catalogue lacks — most Afrobeats included — she finds the official video and converts it to full MP3 via a keyless route that works from datacenter hosts, with the optional NABEES key below as an extra fallback, and the official 30-second preview only as the honest last resort), TikTok, Instagram, Facebook, X/Twitter, YouTube (video + audio via the optional key below), Spotify previews, `.ytsearch`
 - **👥 Groups** — in self mode the owner just talks and she answers (no @ needed); she also answers @-mentions, and every command works in groups — the ⚡ reaction confirms she received it
@@ -125,7 +128,7 @@ After your own WhatsApp is linked, friends can connect **their own** WhatsApp to
 2. A pairing code appears on the dashboard within a few seconds. The friend types it **from their own phone**: WhatsApp → Settings → Linked devices → "Link with phone number instead".
 3. Done — that phone now has its own DamzD: own session, own data, and (with `ACCESS_MODE=self`, the default) commands answer only to that phone. Nobody's chats cross paths.
 4. **Disconnect** on the dashboard stops that bot and wipes its session.
-5. **Ban** stops a connected friend's bot immediately but keeps their WhatsApp link — the bot will not start again until you **Unban** them, which brings it straight back with the same pairing (no fresh code needed). Ban works from chat too: `.ban <number>` (or reply to one of their messages with `.ban`) stops their bot, `.unban <number>` revives it. A banned row shows a red 🚫 badge on the dashboard. Banning a number that is not connected just blocks that user from your own bot as before.
+5. **Ban** stops a connected friend's bot immediately but keeps their WhatsApp link — the bot will not start again until you **unban** them, which brings it straight back with the same pairing (no fresh code needed). Ban lives in chat only: `.ban <number>` (or reply to one of their messages with `.ban`) stops their bot, `.unban <number>` revives it. The dashboard shows the 🚫 status read-only — no ban buttons there. Banning a number that is not connected just blocks that user from your own bot as before.
 
 How it works: each extra WhatsApp is a separate isolated child process with its own `auth/` and `data/` folders — the main bot's code runs unchanged per connection. `MAX_SESSIONS` (default 5) caps how many fit; if all five run at once on the smallest free tier, give the service more RAM. On Render's free tier a restart/redeploy wipes every session (the main one too), so everyone re-pairs from a fresh dashboard code.
 

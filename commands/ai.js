@@ -68,7 +68,7 @@ export default [
   modelCommand("terra", [],
     "GPT-6.1 Terra — the third GPT-6.1 flavour", ["puter-model:gpt-6.1-terra"]),
   modelCommand("llama", ["groq"],
-    "the real Llama 3.3 70B, running on Groq", ["groq"]),
+    "Llama 3.3 70B — real Groq on child bots; the main bot answers with its Puter brains instead", ["groq"]),
   modelCommand("luna", ["gpt5"],
     "GPT-6 Luna via your Puter key (falls back to NABEES GPT-5 Luna)", ["puter-model:gpt-6-luna", "nabees-luna"]),
   modelCommand("deepseek", ["deepseek2", "deepseek3"],

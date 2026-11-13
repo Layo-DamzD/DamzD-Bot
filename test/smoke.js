@@ -5,6 +5,10 @@
 process.env.OWNER_NUMBER = "2348000000001";
 process.env.ACCESS_MODE = "self";
 process.env.GROQ_API_KEY = "test-key";
+// The suite runs as a child bot: children run on Groq (the split from
+// v1.4.19), and the Groq mock below stands in for that brain. The main bot's
+// Puter/Groq split is asserted separately in its own check.
+process.env.DAMZD_CHILD = "1";
 process.env.DATA_DIR = "./test/.tmp-data";
 
 const sent = [];
@@ -245,7 +249,7 @@ await check("public mode receptionist greets greetings with a short line", async
   const fan = "2348666000005@s.whatsapp.net";
   await processMessage(deps, nonOwnerSock, textMessage("Good morning", { jid: fan, fromMe: false }));
   const reply = sent.map(item => item.content?.text || "").find(Boolean) || "";
-  assert.match(reply, /DamzD will attend|will reply you|will get back to you/);
+  assert.match(reply, /DamzD will attend|will reply you|will get back to you|will reach you when he is less busy/);
   assert.equal(groqCalls.length, 0, "greetings never wake the AI brain");
 });
 
@@ -491,6 +495,40 @@ await check(".ban from chat stops a connected friend's bot and .unban revives it
     mgr.stopAll();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+await check("the AI split — main bot never sees Groq, children run on Groq only", async () => {
+  const saved = process.env.DAMZD_CHILD;
+  // Main bot mode (fresh module instance via the query-string cache buster):
+  // Groq key is stripped no matter what the environment says, Puter accounts
+  // arrive deduped, and the bot counts as having a brain through Puter.
+  process.env.DAMZD_CHILD = "";
+  process.env.PUTER_AUTH_TOKEN = "tok-a, tok-b ,tok-a";
+  const mainMod = await import("../src/config.js?main");
+  assert.equal(mainMod.childMode, false);
+  assert.equal(mainMod.config.groq.apiKey, "", "main bot must never carry a Groq key");
+  assert.deepEqual(mainMod.config.puterTokens, ["tok-a", "tok-b"], "Puter accounts deduped");
+  assert.equal(mainMod.hasAIBrain(), true, "main bot has a brain via Puter");
+  // Child mode: Groq is the brain, Puter is empty — friends never burn the
+  // owner's Puter quota.
+  process.env.DAMZD_CHILD = "1";
+  const childMod = await import("../src/config.js?child");
+  assert.equal(childMod.childMode, true);
+  assert.equal(childMod.config.groq.apiKey, "test-key", "children run on Groq");
+  assert.equal(childMod.config.puterTokens.length, 0, "children never touch Puter");
+  assert.equal(childMod.hasAIBrain(), true, "child bot has a brain via Groq");
+  process.env.DAMZD_CHILD = saved;
+  delete process.env.PUTER_AUTH_TOKEN;
+});
+
+await check(".voices lists the AI voices .tts can speak with", async () => {
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".voices"));
+  const reply = firstText();
+  assert.match(reply, /tts ezinne/i);
+  assert.match(reply, /abeo/i);
+  assert.match(reply, /Nigerian/);
+  assert.match(reply, /British/);
 });
 
 await check("no reply text ever contains promotional content", async () => {

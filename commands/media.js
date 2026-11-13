@@ -2,6 +2,21 @@ import { generateImage, ttsAudio, transcribeAudio } from "../src/apis.js";
 import { fetchBuffer } from "../src/apis.js";
 import { toVoiceOgg } from "../src/mediautil.js";
 
+// The .tts voice shelf — friendly aliases for the Microsoft Edge neural
+// voices (all verified live against Microsoft's voice list). The two
+// Nigerian voices come first; ezinne is the default the bot already spoke.
+// Any other Edge ShortName works too, e.g. ".tts en-GB-LibbyNeural | hello".
+const TTS_VOICES = {
+  ezinne: ["en-NG-EzinneNeural", "Nigerian English · female (default)"],
+  abeo: ["en-NG-AbeoNeural", "Nigerian English · male"],
+  aria: ["en-US-AriaNeural", "American · female"],
+  jenny: ["en-US-JennyNeural", "American · warm female"],
+  guy: ["en-US-GuyNeural", "American · male"],
+  emma: ["en-US-EmmaNeural", "American · calm female"],
+  sonia: ["en-GB-SoniaNeural", "British · female"],
+  ryan: ["en-GB-RyanNeural", "British · male"]
+};
+
 async function quotedVoiceBuffer(ctx) {
   const info = ctx.msg.message?.extendedTextMessage?.contextInfo;
   const quoted = info?.quotedMessage;
@@ -44,24 +59,38 @@ export default [
     name: "tts",
     aliases: ["tts2", "tts3", "tts4", "tts5"],
     category: "AI Media",
-    description: "convert text to a voice note",
+    description: "convert text to a voice note (.voices shows the AI voices)",
     run: async ctx => {
       const raw = String(ctx.args || "").trim();
-      if (!raw) throw new Error("give me the text to read out");
+      if (!raw) throw new Error("give me the text to read out (say .voices to hear different voices)");
       let text = raw;
       let language = "en";
-      const match = raw.match(/^([a-z]{2})\s*[|,]\s*(.+)$/i);
-      if (match) {
-        language = match[1].toLowerCase();
-        text = match[2].trim();
+      let voice = "";
+      // ".tts abeo | hello" (alias), ".tts en-GB-RyanNeural | hello" (raw Edge
+      // name) or the classic ".tts fr | bonjour" (language for the Google
+      // engine). Alias and full neural name win; a bare two-letter code is a
+      // language.
+      const split = raw.match(/^([a-zA-Z][a-zA-Z-]*)\s*[|,]\s*(.+)$/);
+      if (split) {
+        const key = split[1].toLowerCase();
+        if (TTS_VOICES[key]) {
+          voice = TTS_VOICES[key][0];
+          text = split[2].trim();
+        } else if (/^[a-z]{2}-[a-z]{2}-[a-z]+neural$/i.test(split[1])) {
+          voice = split[1];
+          text = split[2].trim();
+        } else if (key.length === 2) {
+          language = key;
+          text = split[2].trim();
+        }
       }
       await ctx.typing(900);
-      const { buffer, truncated } = await ttsAudio(text, language);
+      const { buffer, truncated } = await ttsAudio(text, language, voice);
       try {
         // A true voice note is OGG/Opus. The service returns MP3 — without
         // conversion the note arrives broken ("wrong with the audio file").
-        const voice = await toVoiceOgg(buffer);
-        await ctx.send({ audio: voice, mimetype: "audio/ogg; codecs=opus", ptt: true });
+        const voiceNote = await toVoiceOgg(buffer);
+        await ctx.send({ audio: voiceNote, mimetype: "audio/ogg; codecs=opus", ptt: true });
       } catch {
         // Host without ffmpeg: a plain audio clip still plays everywhere —
         // a broken voice note never does.
@@ -70,6 +99,22 @@ export default [
       if (truncated) {
         await ctx.reply("I read the first 200 characters — that is the limit per voice note.");
       }
+    }
+  },
+  {
+    name: "voices",
+    category: "AI Media",
+    description: "list the AI voices .tts can speak with",
+    run: async ctx => {
+      const lines = Object.entries(TTS_VOICES).map(([alias, [, label]]) =>
+        "• " + ctx.config.prefix + "tts " + alias + " — " + label
+      );
+      await ctx.reply(
+        "My AI voices — use them like " + ctx.config.prefix + "tts abeo | big boys don't pay\n\n" +
+        lines.join("\n") +
+        "\n\nThe default is ezinne 🇳🇬. Any Edge neural name works too, " +
+        "like " + ctx.config.prefix + "tts en-GB-LibbyNeural | hello"
+      );
     }
   },
   {

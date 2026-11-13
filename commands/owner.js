@@ -111,7 +111,11 @@ export default [
         "Memory: " + Math.round(process.memoryUsage().heapUsed / 1048576) + " MB\n" +
         "Node: " + process.version + "\n" +
         "Paired as: " + (ctx.sock?.user?.id || "unknown") + "\n" +
-        "Groq key: " + (appConfig.groq.apiKey ? "set" : "not set") + "\n" +
+        "AI brain: " + (appConfig.childMode
+          ? (appConfig.groq.apiKey ? "Groq (child bot)" : "Groq — no key set (child bot)")
+          : (appConfig.puterTokens.length
+            ? "Puter flagships (" + appConfig.puterTokens.length + (appConfig.puterTokens.length === 1 ? " account" : " accounts") + ")"
+            : "no Puter token — keyless services only")) + "\n" +
         "OpenRouter key: " + (appConfig.openrouter.apiKey ? "set" : "not set")
       );
     }

@@ -1,4 +1,4 @@
-import { config, hasAIBrain } from "./config.js";
+import { config, hasAIBrain, childMode, puterTokens } from "./config.js";
 
 export { hasAIBrain };
 
@@ -157,12 +157,8 @@ async function callNabeesAI(chat) {
 // that request. The SDK is imported lazily so the bot still boots fine before
 // the package or token exists — that brain simply sleeps and the standard
 // chain answers instead.
-const PUTER_TOKENS = [...new Set(
-  String(process.env.PUTER_AUTH_TOKEN || "")
-    .split(",")
-    .map(token => token.trim())
-    .filter(Boolean)
-)];
+// The owner's Puter tokens come from config (they are empty on child bots —
+// children run on Groq only, the main bot on Puter flagships).
 let puterCursor = 0;
 const puterClients = new Map();
 async function getPuterFor(token) {
@@ -185,10 +181,10 @@ function puterText(result) {
 }
 
 async function callPuterModel(chat, model) {
-  if (!PUTER_TOKENS.length) throw new Error("no-key");
+  if (!puterTokens.length) throw new Error("no-key");
   let lastError = null;
-  for (let attempt = 0; attempt < PUTER_TOKENS.length; attempt++) {
-    const token = PUTER_TOKENS[(puterCursor + attempt) % PUTER_TOKENS.length];
+  for (let attempt = 0; attempt < puterTokens.length; attempt++) {
+    const token = puterTokens[(puterCursor + attempt) % puterTokens.length];
     try {
       const puter = await getPuterFor(token);
       const answer = await Promise.race([
@@ -200,7 +196,7 @@ async function callPuterModel(chat, model) {
       if (!text) throw new Error("the Puter model had nothing to say.");
       // Success — the next call starts from the next account so the load and
       // the per-account free quotas spread evenly.
-      puterCursor = (puterCursor + attempt + 1) % PUTER_TOKENS.length;
+      puterCursor = (puterCursor + attempt + 1) % puterTokens.length;
       return stripThinking(text);
     } catch (error) {
       lastError = error;
@@ -248,6 +244,20 @@ export function classifyTask(prompt) {
 
 export function routeTask(prompt) {
   return TASK_ROUTES[classifyTask(prompt)] || TASK_ROUTES.chat;
+}
+
+// Walk a route's model ladder on Puter until one answers. Shared by the
+// "auto" brain, the per-model commands and the main bot's standard chain.
+async function runPuterRoute(chat, route) {
+  let routeError = null;
+  for (const model of route) {
+    try {
+      return await callPuterModel(chat, model);
+    } catch (error) {
+      routeError = error;
+    }
+  }
+  throw routeError || new Error("no model on the route answered");
 }
 
 // Named brains for the per-model commands (.chatgpt, .llama, .luna, .deepseek).
@@ -320,16 +330,7 @@ export async function askAI({ messages, ownerName, style, brains } = {}) {
         // the next brain (or the standard chain below) takes over.
         if (brain === "auto") {
           const lastUser = [...chat].reverse().find(message => message.role === "user");
-          const route = routeTask(lastUser?.content);
-          let routeError = null;
-          for (const model of route) {
-            try {
-              return await callPuterModel(chat, model);
-            } catch (error) {
-              routeError = error;
-            }
-          }
-          throw routeError || new Error("no model on the route answered");
+          return await runPuterRoute(chat, routeTask(lastUser?.content));
         }
         const run = BRAINS[brain];
         if (run) return await run(chat);
@@ -339,7 +340,37 @@ export async function askAI({ messages, ownerName, style, brains } = {}) {
     }
   }
   const failures = [];
-  if (config.groq.apiKey) {
+  // The AI split, applied to every plain chat (no explicit brain): the main
+  // bot reads the question and sends it to the best Puter flagship, with
+  // OpenRouter and the keyless services underneath — never Groq. A child bot
+  // starts at Groq and never touches Puter or OpenRouter.
+  if (!childMode) {
+    if (puterTokens.length) {
+      try {
+        const lastUser = [...chat].reverse().find(message => message.role === "user");
+        return await runPuterRoute(chat, routeTask(lastUser?.content));
+      } catch (error) {
+        failures.push(error?.message);
+      }
+    }
+    if (config.openrouter.apiKey) {
+      try {
+        return await callOpenAICompatible({
+          url: config.openrouter.url,
+          apiKey: config.openrouter.apiKey,
+          model: config.openrouter.model,
+          messages: chat,
+          label: "backup AI service",
+          extraHeaders: {
+            "HTTP-Referer": "https://damzd.local",
+            "X-Title": config.name
+          }
+        });
+      } catch (error) {
+        failures.push(error?.message);
+      }
+    }
+  } else if (config.groq.apiKey) {
     try {
       return await callOpenAICompatible({
         url: config.groq.url,
@@ -347,23 +378,6 @@ export async function askAI({ messages, ownerName, style, brains } = {}) {
         model: config.groq.model,
         messages: chat,
         label: "AI service"
-      });
-    } catch (error) {
-      failures.push(error?.message);
-    }
-  }
-  if (config.openrouter.apiKey) {
-    try {
-      return await callOpenAICompatible({
-        url: config.openrouter.url,
-        apiKey: config.openrouter.apiKey,
-        model: config.openrouter.model,
-        messages: chat,
-        label: "backup AI service",
-        extraHeaders: {
-          "HTTP-Referer": "https://damzd.local",
-          "X-Title": config.name
-        }
       });
     } catch (error) {
       failures.push(error?.message);
