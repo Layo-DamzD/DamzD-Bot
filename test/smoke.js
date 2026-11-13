@@ -34,6 +34,7 @@ globalThis.fetch = async (url, options = {}) => {
 };
 
 const { loadCommands, buildLookup, resolveCommandInput } = await import("../src/loader.js");
+const { setAccessMode } = await import("../src/config.js");
 const { ChatMemory } = await import("../src/memory.js");
 const { JsonStore, ANTILINK_ON } = await import("../src/store.js");
 const { processMessage } = await import("../src/runtime.js");
@@ -74,7 +75,7 @@ function textMessage(text, overrides = {}) {
   };
 }
 
-const deps = { processed: new Set(), store, memory, lookup, commands };
+const deps = { processed: new Set(), ownerActivity: new Map(), store, memory, lookup, commands };
 const firstText = () => sent.map(item => item.content?.text || "").find(Boolean) || "";
 let passed = 0;
 async function check(label, fn) {
@@ -153,30 +154,56 @@ await check("honest fun commands stay wired after the anime and fake-generator r
   }
 });
 
-await check("unknown command in DM gets a gentle suggestion", async () => {
+await check(".vv is gone — .Ggs is the harmless gaming skin", async () => {
+  assert.equal(lookup.get("ggs")?.name, "Ggs", "ggs command exists");
+  assert.ok(!lookup.has("vv"), "vv is fully gone");
+  assert.ok(!lookup.has("viewonce"), "viewonce alias is gone too");
   sent.length = 0;
-  await processMessage(deps, ownerSock, textMessage(".frobnicate"));
-  assert.match(firstText(), /do not know that command/);
+  await processMessage(deps, ownerSock, textMessage(".Ggs"));
+  assert.match(firstText(), /GG|good game/i);
 });
 
-await check("plain DM text goes to the AI brain with memory", async () => {
+await check("unknown command gets a gentle suggestion only in the bot's own chat", async () => {
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".frobnicate", { jid: ownerSock.user.id }));
+  assert.match(firstText(), /do not know that command/);
+  // In a friend's chat even a typo'd command stays invisible — a "..." typed
+  // to a friend must never make her talk.
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".frobnicate", { jid: "2348000000009@s.whatsapp.net" }));
+  assert.equal(sent.length, 0, "unknown commands are silent in other people's chats");
+});
+
+await check("the owner's text to a friend is NEVER answered (the amebo fix)", async () => {
   sent.length = 0;
   groqCalls.length = 0;
-  await processMessage(deps, ownerSock, textMessage("Hello, how are you today?"));
+  const friendChat = "2348000000009@s.whatsapp.net";
+  await processMessage(deps, ownerSock, textMessage("Hello, how are you today?", { jid: friendChat }));
+  await processMessage(deps, ownerSock, textMessage("I will call you later", { jid: friendChat, id: "FRIEND2" }));
+  assert.equal(sent.length, 0, "his own conversations must stay untouched");
+  assert.equal(groqCalls.length, 0, "no AI calls for his outgoing texts");
+});
+
+await check("the owner's chat with the bot itself still gets the full assistant", async () => {
+  sent.length = 0;
+  groqCalls.length = 0;
+  const selfChat = ownerSock.user.id;
+  await processMessage(deps, ownerSock, textMessage("Hello, how are you today?", { jid: selfChat }));
   assert.ok(groqCalls.length === 1, "groq should have been called");
   assert.match(groqCalls[0].model, /llama/);
   assert.match(groqCalls[0].messages[0].content, /DamzD/);
   assert.ok(!/How may I assist you today/.test(groqCalls[0].messages[0].content));
   assert.match(sent.at(-1).content.text, /Good evening/);
   assert.ok(presence.some(item => item.type === "composing"), "should show typing first");
-  assert.equal(memory.history("2348000000001@s.whatsapp.net").length, 2, "user + assistant stored");
+  assert.equal(memory.history(selfChat).length, 2, "user + assistant stored");
 });
 
 await check("AI replies use memory context on follow-ups", async () => {
   sent.length = 0;
   groqCalls.length = 0;
   await new Promise(resolve => setTimeout(resolve, 2600));
-  await processMessage(deps, ownerSock, textMessage("What did I just ask you?"));
+  const selfChat = ownerSock.user.id;
+  await processMessage(deps, ownerSock, textMessage("What did I just ask you?", { jid: selfChat }));
   const lastUser = groqCalls[0].messages.filter(m => m.role === "user").at(-1).content;
   assert.equal(lastUser, "What did I just ask you?");
   const previousUser = groqCalls[0].messages.filter(m => m.role === "user").at(0).content;
@@ -195,6 +222,48 @@ await check("self mode ignores non-owner messages completely", async () => {
   assert.equal(groqCalls.length, 0);
 });
 
+await check("public mode receptionist greets greetings with a short line", async () => {
+  setAccessMode("public");
+  sent.length = 0;
+  groqCalls.length = 0;
+  const fan = "2348666000005@s.whatsapp.net";
+  await processMessage(deps, nonOwnerSock, textMessage("Good morning", { jid: fan, fromMe: false }));
+  const reply = sent.map(item => item.content?.text || "").find(Boolean) || "";
+  assert.match(reply, /DamzD will attend|will reply you|will get back to you/);
+  assert.equal(groqCalls.length, 0, "greetings never wake the AI brain");
+});
+
+await check("public mode receptionist answers questions with 'will attend once free'", async () => {
+  sent.length = 0;
+  groqCalls.length = 0;
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  const fan2 = "2348666000006@s.whatsapp.net";
+  await processMessage(deps, nonOwnerSock, textMessage("What is the plan for today?", { jid: fan2, fromMe: false }));
+  const reply = sent.map(item => item.content?.text || "").find(Boolean) || "";
+  assert.match(reply, /once he is free|as soon as he is free/);
+  assert.equal(groqCalls.length, 0, "questions get the receptionist, not the AI");
+});
+
+await check("public mode receptionist stays silent for ordinary chatter", async () => {
+  sent.length = 0;
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  const fan3 = "2348666000007@s.whatsapp.net";
+  await processMessage(deps, nonOwnerSock, textMessage("lol ok na", { jid: fan3, fromMe: false }));
+  assert.equal(sent.length, 0, "no amebo — no reply to ordinary chatter");
+});
+
+await check("receptionist goes quiet while the owner is present in that chat", async () => {
+  sent.length = 0;
+  groqCalls.length = 0;
+  const friendChat = "2348000000009@s.whatsapp.net";
+  // The owner is right there texting his friend…
+  await processMessage(deps, ownerSock, textMessage("I dey come", { jid: friendChat, id: "ACTIVE1" }));
+  // …so even a greeting from the friend gets no receptionist reply.
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  await processMessage(deps, nonOwnerSock, textMessage("hello o", { jid: friendChat, fromMe: false }));
+  assert.equal(sent.length, 0, "owner is present — she says nothing");
+});
+
 await check("link sent in DM auto-downloads without a command", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage("check this out https://www.tiktok.com/@user/video/123"));
@@ -202,7 +271,7 @@ await check("link sent in DM auto-downloads without a command", async () => {
   assert.ok(kinds.includes("video"), "should send the video");
 });
 
-await check("group mention wakes the AI", async () => {
+await check("group mention wakes the AI for the owner", async () => {
   sent.length = 0;
   groqCalls.length = 0;
   groupMeta = {
@@ -227,13 +296,35 @@ await check("group mention wakes the AI", async () => {
   assert.match(sent.at(-1).content.text, /Good evening/);
 });
 
-await check("owner's plain group message wakes the AI without a mention", async () => {
+await check("owner's plain group message no longer wakes the AI", async () => {
   sent.length = 0;
   groqCalls.length = 0;
   await new Promise(resolve => setTimeout(resolve, 2600));
   await processMessage(deps, ownerSock, textMessage("anyone watching the match?", { jid: "123@g.us" }));
-  assert.ok(groqCalls.length === 1, "owner never needs to mention her in groups");
-  assert.match(sent.at(-1).content.text, /Good evening/);
+  assert.equal(groqCalls.length, 0, "his group chat is conversation, not a prompt");
+  assert.equal(sent.length, 0, "and she does not talk over him");
+});
+
+await check("non-owner group mention gets the receptionist in public mode", async () => {
+  sent.length = 0;
+  groqCalls.length = 0;
+  // The owner left the group more than 10 minutes ago — simulate that here,
+  // because earlier checks in this file had him texting in the same group.
+  deps.ownerActivity.delete("123@g.us");
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  const ping = textMessage("@2348000000002 who is this?", { jid: "123@g.us", fromMe: false });
+  ping.key.participant = "2348555000009@s.whatsapp.net";
+  ping.message = {
+    extendedTextMessage: {
+      text: "@2348000000002 who is this?",
+      contextInfo: { mentionedJid: ["2348000000002@s.whatsapp.net"] }
+    }
+  };
+  await processMessage(deps, nonOwnerSock, ping);
+  const reply = sent.map(item => item.content?.text || "").find(Boolean) || "";
+  assert.match(reply, /he is free/);
+  assert.equal(groqCalls.length, 0);
+  setAccessMode("self");
 });
 
 await check("non-owner group message without mention stays quiet", async () => {
@@ -242,7 +333,7 @@ await check("non-owner group message without mention stays quiet", async () => {
   const bystander = textMessage("anyone watching the match?", { jid: "123@g.us", fromMe: false });
   bystander.key.participant = "2348555000009@s.whatsapp.net";
   await processMessage(deps, nonOwnerSock, bystander);
-  assert.equal(groqCalls.length, 0, "only the owner can wake her in self mode");
+  assert.equal(groqCalls.length, 0, "only mentions can wake her in groups");
   assert.equal(sent.length, 0);
 });
 

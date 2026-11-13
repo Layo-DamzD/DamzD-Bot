@@ -150,19 +150,27 @@ async function callNabeesAI(chat) {
   throw new Error("the backup AI services had nothing to say. Try again in a moment.");
 }
 
-// Puter — the owner's free Puter account (PUTER_AUTH_TOKEN) unlocks the REAL
-// flagship models: Claude, GPT and Gemini, through puter.ai.chat. The SDK is
-// imported lazily so the bot still boots fine before the package or token
-// exists — that brain simply sleeps and the standard chain answers instead.
-let puterClient = null;
-async function getPuter() {
-  const token = String(process.env.PUTER_AUTH_TOKEN || "").trim();
-  if (!token) throw new Error("no-key");
-  if (!puterClient) {
+// Puter — the owner's free Puter accounts (PUTER_AUTH_TOKEN) unlock the REAL
+// flagship models: Claude, GPT and Gemini, through puter.ai.chat. Several
+// accounts can be supplied comma-separated; calls rotate through them
+// round-robin and an account that fails (rate limit, asleep) is skipped for
+// that request. The SDK is imported lazily so the bot still boots fine before
+// the package or token exists — that brain simply sleeps and the standard
+// chain answers instead.
+const PUTER_TOKENS = [...new Set(
+  String(process.env.PUTER_AUTH_TOKEN || "")
+    .split(",")
+    .map(token => token.trim())
+    .filter(Boolean)
+)];
+let puterCursor = 0;
+const puterClients = new Map();
+async function getPuterFor(token) {
+  if (!puterClients.has(token)) {
     const { init } = await import("@heyputer/puter.js/src/init.cjs");
-    puterClient = init(token);
+    puterClients.set(token, init(token));
   }
-  return puterClient;
+  return puterClients.get(token);
 }
 
 function puterText(result) {
@@ -177,15 +185,29 @@ function puterText(result) {
 }
 
 async function callPuterModel(chat, model) {
-  const puter = await getPuter();
-  const answer = await Promise.race([
-    puter.ai.chat(chat, { model }),
-    new Promise((_resolve, reject) =>
-      setTimeout(() => reject(new Error("the Puter model took too long")), 90000))
-  ]);
-  const text = puterText(answer);
-  if (!text) throw new Error("the Puter model had nothing to say.");
-  return stripThinking(text);
+  if (!PUTER_TOKENS.length) throw new Error("no-key");
+  let lastError = null;
+  for (let attempt = 0; attempt < PUTER_TOKENS.length; attempt++) {
+    const token = PUTER_TOKENS[(puterCursor + attempt) % PUTER_TOKENS.length];
+    try {
+      const puter = await getPuterFor(token);
+      const answer = await Promise.race([
+        puter.ai.chat(chat, { model }),
+        new Promise((_resolve, reject) =>
+          setTimeout(() => reject(new Error("the Puter model took too long")), 90000))
+      ]);
+      const text = puterText(answer);
+      if (!text) throw new Error("the Puter model had nothing to say.");
+      // Success — the next call starts from the next account so the load and
+      // the per-account free quotas spread evenly.
+      puterCursor = (puterCursor + attempt + 1) % PUTER_TOKENS.length;
+      return stripThinking(text);
+    } catch (error) {
+      lastError = error;
+      continue; // that account failed — try the next one on this same request
+    }
+  }
+  throw lastError || new Error("the Puter models are quiet right now.");
 }
 
 // Named brains for the per-model commands (.chatgpt, .llama, .luna, .deepseek).

@@ -8,7 +8,7 @@ Built on Node.js + [Baileys](https://github.com/WhiskeySockets/Baileys) (linked-
 
 Most free WhatsApp bots staple an advertisement onto every single message. DamzD was built to do the opposite:
 
-- 🗣 **Chats like a real person** — natural language, short replies, memory of the conversation, calm manners.
+- 🗣 **Receptionist, not an amebo** — the bot never chats over you: your own outgoing messages are never answered, and while you are present in a chat she stays completely silent. When you are away, greetings from other people get a warm one-liner and questions get "DamzD will attend once he is free" — no AI conversations with your contacts. The full assistant brain answers only in your own "Message yourself" chat and to your explicit commands.
 - 🚫 **Never advertises** — the whole reply pipeline is covered by a smoke test that fails if any promo text sneaks in.
 - 🧰 **Full toolkit** — 200 commands across 13 sections: downloads, AI, news, games, group management, stickers, privacy tools and more — every fake-screenshot generator removed.
 - 🔒 **Private by default** — self mode: only you (the owner) can use it. Flip to public with one command if you want.
@@ -67,7 +67,7 @@ Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_K
 
 ## Optional keys
 
-`.song` works out of the box. `NABEES_API_KEY` (free — sign up at [apis.nabeestech.com](https://apis.nabeestech.com), or use the public free key `nabeestech`, ~100 requests/day) adds: real YouTube copies of songs the music library only has covers of, YouTube/TikTok/Instagram **video** downloads, and the backup AI models. `PUTER_AUTH_TOKEN` (free token from your Puter account) unlocks the **real flagship brains** — `.claude` becomes actual Claude Sonnet, `.chatgpt` actual GPT, `.gemini` actual Gemini — with automatic fallback to the built-in chain when it's absent. `.removebg` optionally takes `PHOTOROOM_API_KEY`. Without any keys every other command still works — the bot says so plainly instead of failing silently.
+`.song` works out of the box. `NABEES_API_KEY` (free — sign up at [apis.nabeestech.com](https://apis.nabeestech.com), or use the public free key `nabeestech`, ~100 requests/day) adds: real YouTube copies of songs the music library only has covers of, YouTube/TikTok/Instagram **video** downloads, and the backup AI models. `PUTER_AUTH_TOKEN` (free token from your Puter account) unlocks the **real flagship brains** — `.claude` becomes actual Claude Sonnet, `.chatgpt` actual GPT, `.gemini` actual Gemini. Paste several tokens separated by commas and calls rotate through them round-robin, skipping any account that is rate-limited. Automatic fallback to the built-in chain when it's absent. `.removebg` optionally takes `PHOTOROOM_API_KEY`. Without any keys every other command still works — the bot says so plainly instead of failing silently.
 
 ## What DamzD can do
 
@@ -82,7 +82,7 @@ Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_K
 - **🎮 Games** — trivia, riddles, 8ball, dice, polls, calculator, multiplayer Word Chain (`.wcg`)
 - **🎉 Fun** — jokes (dad, Chuck Norris, programming), facts, animals, quotes, history
 - **👥 Group** — kick/add/promote, tagall, welcome/goodbye, antilink with 3-strike warnings, `.tldr`, `.lore`, `.roast`, `.top`, `.ghost`, invite links. **Group stats are honest**: member numbers are resolved to real phone numbers (never WhatsApp privacy-LID digits), activity is tracked on disk so restarts don't wipe it, `.ghost` tells you exactly how long it has been watching and refuses to judge before it has enough chat history, and the bot itself never appears in its own lists
-- **🛠 Tools** — `.sticker`, `.vv` **silent** view-once recovery (media lands in your own "Message yourself" chat — no reply, no reaction, no trace in the original chat), `.save`, TikTok stalk, lyrics, Bible, wiki, NASA, Pokémon, URL shortener
+- **🛠 Tools** — `.sticker`, `.Ggs` (looks like a "good game" command in the menu — with a view-once quoted it silently recovers the media to your own "Message yourself" chat: no reply, no reaction, no trace in the original chat), `.save`, TikTok stalk, lyrics, Bible, wiki, NASA, Pokémon, URL shortener
 - **🔒 Privacy** — anti-delete/anti-edit alerts, pin/archive/mute/star chats, disappearing messages, block/unblock, message edit/unsend/forward
 - **📱 Status** — post statuses (text/media/mentions), auto-view + auto-react statuses, typing/recording presence
 - **📢 Channel** — follow/unfollow channels, react to posts, post to your own channel
@@ -142,6 +142,8 @@ How it works: each extra WhatsApp is a separate isolated child process with its 
 | `GROQ_API_KEY` | *(empty)* | free AI key, recommended |
 | `OPENROUTER_API_KEY` | *(empty)* | optional backup |
 | `PHOTOROOM_API_KEY` | *(empty)* | enables `.removebg` |
+| `PUTER_AUTH_TOKEN` | *(empty)* | real Claude/GPT/Gemini brains; comma-separated tokens rotate round-robin |
+| `MAX_SESSIONS` | 2 | extra WhatsApps friends may connect, each with its own private bot |
 
 ## Development
 
