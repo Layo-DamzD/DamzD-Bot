@@ -183,6 +183,14 @@ export class SessionManager {
     return { ok: true, number: digits };
   }
 
+  // Is this number one of the connected friend sessions? Accepts any format
+  // the owner might type (local 0803… or international 234803…) and normalizes
+  // the same way connect/ban/unban do.
+  has(rawNumber) {
+    const digits = normalizeNumber(rawNumber, this.countryCode);
+    return this.#entries().some(entry => String(entry.number) === digits);
+  }
+
   // Owner's kill switch for a connected friend: their bot process is stopped
   // and never respawns, but the registration and WhatsApp link are kept — so
   // unbanning brings their bot straight back without a fresh pairing.

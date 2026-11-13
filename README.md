@@ -125,7 +125,7 @@ After your own WhatsApp is linked, friends can connect **their own** WhatsApp to
 2. A pairing code appears on the dashboard within a few seconds. The friend types it **from their own phone**: WhatsApp → Settings → Linked devices → "Link with phone number instead".
 3. Done — that phone now has its own DamzD: own session, own data, and (with `ACCESS_MODE=self`, the default) commands answer only to that phone. Nobody's chats cross paths.
 4. **Disconnect** on the dashboard stops that bot and wipes its session.
-5. **Ban** stops a connected friend's bot immediately but keeps their WhatsApp link — the bot will not start again until you **Unban** them, which brings it straight back with the same pairing (no fresh code needed). A banned row shows a red 🚫 badge on the dashboard.
+5. **Ban** stops a connected friend's bot immediately but keeps their WhatsApp link — the bot will not start again until you **Unban** them, which brings it straight back with the same pairing (no fresh code needed). Ban works from chat too: `.ban <number>` (or reply to one of their messages with `.ban`) stops their bot, `.unban <number>` revives it. A banned row shows a red 🚫 badge on the dashboard. Banning a number that is not connected just blocks that user from your own bot as before.
 
 How it works: each extra WhatsApp is a separate isolated child process with its own `auth/` and `data/` folders — the main bot's code runs unchanged per connection. `MAX_SESSIONS` (default 5) caps how many fit; if all five run at once on the smallest free tier, give the service more RAM. On Render's free tier a restart/redeploy wipes every session (the main one too), so everyone re-pairs from a fresh dashboard code.
 

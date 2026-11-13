@@ -268,7 +268,7 @@ export async function processMessage(deps, sock, msg) {
   const text = messageText(msg.message);
   if (!text) return;
 
-  const ctx = createContext({ sock, msg, config: appConfig, store: deps.store, memory: deps.memory });
+  const ctx = createContext({ sock, msg, config: appConfig, store: deps.store, memory: deps.memory, sessions: deps.sessions || null });
   ctx.commands = deps.commands || [];
   if (!ctx.isOwner && deps.store.get("banned", []).includes(ctx.senderNumber)) return;
 
@@ -389,11 +389,12 @@ export async function processMessage(deps, sock, msg) {
 }
 
 export class DamzDBot {
-  constructor({ commands, lookup, memory, store }) {
+  constructor({ commands, lookup, memory, store, sessions = null }) {
     this.commands = commands;
     this.lookup = lookup;
     this.memory = memory;
     this.store = store;
+    this.sessions = sessions;
     this.processed = new Set();
     this.ownerActivity = new Map(); // chat jid -> last time the owner texted there
     this.sock = null;
@@ -647,7 +648,8 @@ export class DamzDBot {
             store: this.store,
             memory: this.memory,
             lookup: this.lookup,
-            commands: this.commands
+            commands: this.commands,
+            sessions: this.sessions
           }, sock, msg);
         } catch (error) {
           console.error("[" + appConfig.name + "] message error:", error?.message);

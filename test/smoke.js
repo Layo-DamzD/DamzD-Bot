@@ -453,6 +453,46 @@ await check("session ban — a banned friend's bot stops and unban revives it", 
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+await check(".ban from chat stops a connected friend's bot and .unban revives it", async () => {
+  const path = await import("node:path");
+  const os = await import("node:os");
+  const { SessionManager } = await import("../src/sessions.js");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "damzd-ban-cmd-"));
+  const dummy = path.join(tmp, "dummy.js");
+  fs.writeFileSync(dummy, "setTimeout(function(){}, 6e10);");
+  const mgr = new SessionManager({ dataDirectory: tmp, entryPath: dummy });
+  await mgr.connect("08010000003");
+  deps.sessions = mgr; // the main bot carries the session manager for owner commands
+  try {
+    sent.length = 0;
+    // local number format typed by the owner — has() must normalize it
+    await processMessage(deps, ownerSock, textMessage(".ban 08010000003"));
+    assert.match(firstText(), /banned — their connected bot is stopped/);
+    assert.equal(mgr.children.has("2348010000003"), false, "their bot process is dead");
+    assert.equal(mgr.readStatuses().find(row => row.number === "2348010000003").banned, true, "registry shows the ban");
+    // while banned, .ban again reports the friendly error, not a crash
+    sent.length = 0;
+    await processMessage(deps, ownerSock, textMessage(".ban 08010000003"));
+    assert.match(firstText(), /already banned/);
+    // unbanning from chat brings the bot back
+    sent.length = 0;
+    await processMessage(deps, ownerSock, textMessage(".unban 08010000003"));
+    assert.match(firstText(), /unbanned — their bot is starting again/);
+    assert.ok(mgr.children.has("2348010000003"), "their bot respawned");
+    // a number that never connected falls through to the per-chat user ban
+    sent.length = 0;
+    await processMessage(deps, ownerSock, textMessage(".ban 2348111122222"));
+    assert.match(firstText(), /banned from using me/);
+    sent.length = 0;
+    await processMessage(deps, ownerSock, textMessage(".unban 2348111122222"));
+    assert.match(firstText(), /can use me again/);
+  } finally {
+    delete deps.sessions;
+    mgr.stopAll();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 await check("no reply text ever contains promotional content", async () => {
   const all = sent.map(item => JSON.stringify(item.content)).join(" ").toLowerCase();
   for (const phrase of ["powered by", "pairing portal", "benfei", "unlock", "premium"]) {

@@ -59,6 +59,7 @@ async function main() {
       maxSessions: Number(process.env.MAX_SESSIONS || 5) || 5
     });
     sessions.load();
+    bot.sessions = sessions; // .ban/.unban can stop or revive a connected friend's bot from chat
     startHealthServer(bot, config.port, sessions);
     // Render stops deploys with SIGTERM — take the children down cleanly too.
     process.on("SIGTERM", () => {
