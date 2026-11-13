@@ -29,9 +29,10 @@ services:
       - key: ACCESS_MODE
         value: self
       # How many EXTRA WhatsApps friends may connect alongside the main one,
-      # each with its own private bot. Free tier RAM fits about 2.
+      # each with its own private bot. Five is the cap — if all slots run at
+      # once on the smallest free tier, give the service more RAM.
       - key: MAX_SESSIONS
-        value: "2"
+        value: "5"
       - key: PREFIX
         value: "."
       - key: AUTO_DL

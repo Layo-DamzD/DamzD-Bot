@@ -210,14 +210,54 @@ async function callPuterModel(chat, model) {
   throw lastError || new Error("the Puter models are quiet right now.");
 }
 
+// The latest flagships on Puter, each one probed live through puter.ai.chat
+// with a plain shorthand name (13 Nov 2026 — all twelve answered "OK").
+const PUTER_LATEST = {
+  astra: "gpt-6-astra",         // GPT-6 Astra — the strongest coding brain
+  sol: "gpt-6.1-sol",           // GPT-6.1 Sol — newest general flagship, deep reasoning
+  terra: "gpt-6.1-terra",       // GPT-6.1 Terra — the third 6.1 flavour
+  luna: "gpt-6-luna",           // GPT-6 Luna — fast, light, great for quick answers
+  opus: "claude-opus-5-5",      // Claude Opus 5.5 — Anthropic's biggest
+  sonnet: "claude-sonnet-5-5",  // Claude Sonnet 5.5 — the fast Claude
+  fable: "claude-fable-5-2",    // Claude Fable 5.2 — Anthropic's storyteller family
+  argon: "gemini-4-argon",      // Gemini 4 Argon — Google's newest flagship
+  flash: "gemini-3.8-flash"     // Gemini 3.8 Flash — the quick Gemini
+};
+
+// The auto-router: read the question, decide what KIND of task it is, and
+// send it to the brain that is best at that kind — Astra for code (the
+// owner's pick), Sol for maths and general questions, Fable for stories and
+// creative writing, Luna when speed matters more than depth. Every route
+// keeps a fallback ladder under it so a sleeping model never dead-ends.
+const TASK_ROUTES = {
+  code: [PUTER_LATEST.astra, PUTER_LATEST.sol, PUTER_LATEST.luna],
+  math: [PUTER_LATEST.sol, PUTER_LATEST.astra, PUTER_LATEST.luna],
+  creative: [PUTER_LATEST.fable, PUTER_LATEST.sol, PUTER_LATEST.luna],
+  translate: [PUTER_LATEST.luna, PUTER_LATEST.sol, PUTER_LATEST.astra],
+  chat: [PUTER_LATEST.sol, PUTER_LATEST.astra, PUTER_LATEST.luna]
+};
+
+export function classifyTask(prompt) {
+  const text = String(prompt || "").toLowerCase();
+  if (/(translate|translation|how do (you|i) say|what does .* mean in |in (yoruba|igbo|hausa|pidgin|french|spanish|german|arabic|chinese|japanese)\b)/.test(text)) return "translate";
+  if (/(```|function\b|debug|bug\b|error\b|stack ?trace|code\b|coding|program|script\b|javascript|typescript|python\b|java\b|c\+\+|c#|php\b|sql\b|html\b|css\b|react\b|node\.?js|api\b|regex|algorithm|compile|npm\b|git\b|json\b|class \w|array\b|loop\b|variable|database|syntax)/.test(text)) return "code";
+  if (/(solve|calculate|equation|arithmetic|\bmath|algebra|geometry|percentage|integral|derivative|probability|\d+\s*[+\-*/^×÷]\s*\d+)/.test(text)) return "math";
+  if (/(story|poem|poetry|write me|write a|essay|lyrics|joke|caption|slogan|speech|imagine|roleplay|novel|rhyme|fairytale|fairy tale|bedtime)/.test(text)) return "creative";
+  return "chat";
+}
+
+export function routeTask(prompt) {
+  return TASK_ROUTES[classifyTask(prompt)] || TASK_ROUTES.chat;
+}
+
 // Named brains for the per-model commands (.chatgpt, .llama, .luna, .deepseek).
 // Each one is a REAL model behind a free service — not a persona wearing a
 // name. When a brain is unavailable (no key yet, sleeping service) askAI
 // quietly continues down the standard chain, so a command never dead-ends.
 const BRAINS = {
-  "puter-claude": chat => callPuterModel(chat, "claude-sonnet-4-6"),
-  "puter-gpt": chat => callPuterModel(chat, "gpt-5.4-nano"),
-  "puter-gemini": chat => callPuterModel(chat, "gemini-3.1-flash-lite"),
+  "puter-claude": chat => callPuterModel(chat, PUTER_LATEST.sonnet),
+  "puter-gpt": chat => callPuterModel(chat, PUTER_LATEST.luna),
+  "puter-gemini": chat => callPuterModel(chat, PUTER_LATEST.flash),
   groq: async chat => {
     if (!config.groq.apiKey) throw new Error("no-key");
     return callOpenAICompatible({
@@ -269,6 +309,27 @@ export async function askAI({ messages, ownerName, style, brains } = {}) {
               "X-Title": config.name
             }
           });
+        }
+        // "puter-model:<id>" — one specific Puter model, e.g. .astra sends
+        // "puter-model:gpt-6-astra". Fails over to the next brain on error.
+        if (typeof brain === "string" && brain.startsWith("puter-model:")) {
+          return await callPuterModel(chat, brain.slice("puter-model:".length));
+        }
+        // "auto" — the smart router: classify the question, then walk the
+        // route's model ladder. If every model on the route fails, throw so
+        // the next brain (or the standard chain below) takes over.
+        if (brain === "auto") {
+          const lastUser = [...chat].reverse().find(message => message.role === "user");
+          const route = routeTask(lastUser?.content);
+          let routeError = null;
+          for (const model of route) {
+            try {
+              return await callPuterModel(chat, model);
+            } catch (error) {
+              routeError = error;
+            }
+          }
+          throw routeError || new Error("no model on the route answered");
         }
         const run = BRAINS[brain];
         if (run) return await run(chat);

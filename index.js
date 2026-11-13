@@ -56,7 +56,7 @@ async function main() {
     const sessions = new SessionManager({
       dataDirectory: path.resolve(config.dataDirectory),
       entryPath: path.join(directory, "index.js"),
-      maxSessions: Number(process.env.MAX_SESSIONS || 2) || 2
+      maxSessions: Number(process.env.MAX_SESSIONS || 5) || 5
     });
     sessions.load();
     startHealthServer(bot, config.port, sessions);

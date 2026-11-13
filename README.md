@@ -67,14 +67,14 @@ Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_K
 
 ## Optional keys
 
-`.song` works out of the box. `NABEES_API_KEY` (free — sign up at [apis.nabeestech.com](https://apis.nabeestech.com), or use the public free key `nabeestech`, ~100 requests/day) adds: real YouTube copies of songs the music library only has covers of, YouTube/TikTok/Instagram **video** downloads, and the backup AI models. `PUTER_AUTH_TOKEN` (free token from your Puter account) unlocks the **real flagship brains** — `.claude` becomes actual Claude Sonnet, `.chatgpt` actual GPT, `.gemini` actual Gemini. Paste several tokens separated by commas and calls rotate through them round-robin, skipping any account that is rate-limited. Automatic fallback to the built-in chain when it's absent. `.removebg` optionally takes `PHOTOROOM_API_KEY`. Without any keys every other command still works — the bot says so plainly instead of failing silently.
+`.song` works out of the box. `NABEES_API_KEY` (free — sign up at [apis.nabeestech.com](https://apis.nabeestech.com), or use the public free key `nabeestech`, ~100 requests/day) adds: real YouTube copies of songs the music library only has covers of, YouTube/TikTok/Instagram **video** downloads, and the backup AI models. `PUTER_AUTH_TOKEN` (free token from your Puter account) unlocks the **real flagship brains** — `.chatgpt` reads your question and auto-routes it to the best GPT-6 brain for the task (Astra for code, Sol for maths and general, Luna for quick answers), `.astra`/`.sol`/`.terra`/`.luna` hit those GPT-6 models directly, `.claude` is Claude Opus 5.5, `.fable` is Claude Fable 5.2 (the storyteller) and `.gemini` is Gemini 4 Argon. Paste several tokens separated by commas and calls rotate through them round-robin, skipping any account that is rate-limited. Automatic fallback to the built-in chain when it's absent. `.removebg` optionally takes `PHOTOROOM_API_KEY`. Without any keys every other command still works — the bot says so plainly instead of failing silently.
 
 ## What DamzD can do
 
 `.menu` shows live sections; `.menu news` opens a section. `.help` (or `.commands`) prints **every command with what it does**; `.help song` explains one command. Highlights:
 
 - **🤖 General** — menu, ping, alive, owner card (.vcf), time/date, jid, version
-- **💬 AI & Chat** — `.ai` plus **real per-model brains**: `.chatgpt` (real GPT via Puter key, else open GPT-OSS), `.llama` (real Llama 3.3 70B on Groq), `.luna` (GPT-5 Luna) and `.deepseek` (DeepSeek V4 Flash) via the NABEES studio, `.claude` (real Claude Sonnet via Puter key) and `.gemini` (real Gemini via Puter key) — plus styled companions `.grok`, `.qwen`, `.fable5`, `.wormgpt`, `.mathgpt`, `.aidetect`, `.translate`. Real brains are labelled real; styles are labelled styles — never passed off as models they are not
+- **💬 AI & Chat** — `.ai` plus **real per-model brains**: `.chatgpt` (smart auto-router — picks the best GPT-6 brain for the task: Astra for code, Sol for maths & general, Luna for quick answers), `.astra`, `.sol`, `.terra` and `.luna` (the GPT-6 family directly), `.claude` (Claude Opus 5.5), `.fable` (Claude Fable 5.2, the storyteller), `.gemini` (Gemini 4 Argon), `.llama` (real Llama 3.3 70B on Groq) and `.deepseek` (DeepSeek V4 Flash via the NABEES studio) — plus styled companions `.grok`, `.qwen`, `.fable5`, `.wormgpt`, `.mathgpt`, `.aidetect`, `.translate`. Real brains are labelled real; styles are labelled styles — never passed off as models they are not
 - **🎨 AI Media** — `.flux` image generation, `.tts` voice notes, `.vn2text` transcription, `.ssweb` screenshots
 - **📰 News** — BBC, CNN, Al Jazeera, Guardian, Punch Nigeria and 9 more desks
 - **📥 Downloads** — `.song`/`.play` send **full songs** (real-artist verification: the engine identifies the official recording via Apple's catalogue, pulls the verified track from JioSaavn at up to 320kbps and never passes a cover or karaoke version off as the song; for tracks JioSaavn's catalogue lacks — most Afrobeats included — she finds the official video and converts it to full MP3 via a keyless route that works from datacenter hosts, with the optional NABEES key below as an extra fallback, and the official 30-second preview only as the honest last resort), TikTok, Instagram, Facebook, X/Twitter, YouTube (video + audio via the optional key below), Spotify previews, `.ytsearch`
@@ -125,8 +125,9 @@ After your own WhatsApp is linked, friends can connect **their own** WhatsApp to
 2. A pairing code appears on the dashboard within a few seconds. The friend types it **from their own phone**: WhatsApp → Settings → Linked devices → "Link with phone number instead".
 3. Done — that phone now has its own DamzD: own session, own data, and (with `ACCESS_MODE=self`, the default) commands answer only to that phone. Nobody's chats cross paths.
 4. **Disconnect** on the dashboard stops that bot and wipes its session.
+5. **Ban** stops a connected friend's bot immediately but keeps their WhatsApp link — the bot will not start again until you **Unban** them, which brings it straight back with the same pairing (no fresh code needed). A banned row shows a red 🚫 badge on the dashboard.
 
-How it works: each extra WhatsApp is a separate isolated child process with its own `auth/` and `data/` folders — the main bot's code runs unchanged per connection. `MAX_SESSIONS` (default 2) caps how many fit; free-tier RAM comfortably hosts the main bot plus about two friends. On Render's free tier a restart/redeploy wipes every session (the main one too), so everyone re-pairs from a fresh dashboard code.
+How it works: each extra WhatsApp is a separate isolated child process with its own `auth/` and `data/` folders — the main bot's code runs unchanged per connection. `MAX_SESSIONS` (default 5) caps how many fit; if all five run at once on the smallest free tier, give the service more RAM. On Render's free tier a restart/redeploy wipes every session (the main one too), so everyone re-pairs from a fresh dashboard code.
 
 ## Configuration (`.env`)
 
@@ -136,14 +137,13 @@ How it works: each extra WhatsApp is a separate isolated child process with its 
 | `OWNER_NAME` | DamzD | the bot calls you this |
 | `OWNER_NUMBER` | *(empty)* | international format, no `+`; empty = first paired number owns the bot |
 | `ACCESS_MODE` | self | `self` = owner only, `public` = everyone (render.yaml ships `self`; flip live with `.public` / `.private`) |
-| `MAX_SESSIONS` | 2 | how many extra WhatsApps friends may connect alongside the main bot (each gets its own private bot) |
+| `MAX_SESSIONS` | 5 | how many extra WhatsApps friends may connect alongside the main bot (each gets its own private bot; ban/unban from the dashboard) |
 | `PREFIX` | `.` | command prefix (`.setprefix` also works live) |
 | `AUTO_DL` | true | auto-fetch media when a social link is sent |
 | `GROQ_API_KEY` | *(empty)* | free AI key, recommended |
 | `OPENROUTER_API_KEY` | *(empty)* | optional backup |
 | `PHOTOROOM_API_KEY` | *(empty)* | enables `.removebg` |
 | `PUTER_AUTH_TOKEN` | *(empty)* | real Claude/GPT/Gemini brains; comma-separated tokens rotate round-robin |
-| `MAX_SESSIONS` | 2 | extra WhatsApps friends may connect, each with its own private bot |
 
 ## Development
 

@@ -154,12 +154,28 @@ await check("honest fun commands stay wired after the anime and fake-generator r
   }
 });
 
-await check(".vv is gone — .Ggs is the harmless gaming skin", async () => {
+await check(".Ggs is the harmless gaming skin", async () => {
   assert.equal(lookup.get("ggs")?.name, "Ggs", "ggs command exists");
   assert.ok(!lookup.has("vv"), "vv is fully gone");
   assert.ok(!lookup.has("viewonce"), "viewonce alias is gone too");
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".Ggs"));
+  assert.match(firstText(), /GG|good game/i);
+});
+
+await check(".Ggs, .ggs and .gg all reach the recovery command (case-insensitive)", async () => {
+  for (const typed of [".Ggs", ".ggs", ".gg", ".GGS", ".GG"]) {
+    const parsed = resolveCommandInput(typed, ".");
+    // the exact spelling lowercases into "ggs" or the "gg" alias — both keys
+    // must land on the same Ggs command
+    assert.ok(["ggs", "gg"].includes(parsed.name), typed + " parses to a known key");
+    assert.equal(lookup.get(parsed.name)?.name, "Ggs", typed + " routes to the Ggs command");
+  }
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".ggs"));
+  assert.match(firstText(), /GG|good game/i);
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".gg"));
   assert.match(firstText(), /GG|good game/i);
 });
 
@@ -389,6 +405,52 @@ await check("calc handles arithmetic safely", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".calc process.exit(1)"));
   assert.match(firstText(), /did not work/);
+});
+
+await check("the AI auto-router sends each task to the right flagship", async () => {
+  const { classifyTask, routeTask } = await import("../src/ai.js");
+  assert.equal(classifyTask("write a function to reverse a linked list in javascript"), "code");
+  assert.equal(routeTask("fix this bug in my python script")[0], "gpt-6-astra", "code goes to Astra");
+  assert.equal(classifyTask("solve 12 * 9 + 45 step by step"), "math");
+  assert.equal(routeTask("what is the integral of x^2")[0], "gpt-6.1-sol", "maths goes to Sol");
+  assert.equal(classifyTask("tell me a bedtime story about a lion"), "creative");
+  assert.equal(routeTask("write a poem for my mum")[0], "claude-fable-5-2", "creative writing goes to Fable");
+  assert.equal(classifyTask("translate good morning to yoruba"), "translate");
+  assert.equal(routeTask("how do you say thank you in french")[0], "gpt-6-luna", "translation goes to fast Luna");
+  assert.equal(routeTask("who is the president of france")[0], "gpt-6.1-sol", "general chat goes to Sol");
+  assert.equal(lookup.get("chatgpt")?.brains?.[0], "auto", ".chatgpt uses the auto router");
+  for (const name of ["astra", "sol", "terra", "fable"]) {
+    assert.ok(lookup.has(name), "missing flagship command: " + name);
+  }
+  assert.equal(lookup.get("astra")?.brains?.[0], "puter-model:gpt-6-astra", ".astra hits the real model");
+  assert.equal(lookup.get("claude")?.brains?.[0], "puter-model:claude-opus-5-5", ".claude hits Opus 5.5");
+  assert.equal(lookup.get("gemini")?.brains?.[0], "puter-model:gemini-4-argon", ".gemini hits Gemini 4 Argon");
+});
+
+await check("session ban — a banned friend's bot stops and unban revives it", async () => {
+  const path = await import("node:path");
+  const os = await import("node:os");
+  const { SessionManager } = await import("../src/sessions.js");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "damzd-ban-"));
+  const dummy = path.join(tmp, "dummy.js"); // a child that just sleeps — no real bot boots in tests
+  fs.writeFileSync(dummy, "setTimeout(function(){}, 6e10);");
+  const mgr = new SessionManager({ dataDirectory: tmp, entryPath: dummy });
+  assert.equal(mgr.maxSessions, 5, "default cap is now 5 slots");
+  await mgr.connect("08010000001"); // local format — normalized against the owner's country code
+  assert.ok(mgr.children.has("2348010000001"), "friend session spawned");
+  const banned = mgr.ban("2348010000001");
+  assert.ok(banned.ok, "ban succeeds");
+  assert.equal(mgr.children.has("2348010000001"), false, "their bot is stopped on ban");
+  assert.equal(mgr.readStatuses().find(row => row.number === "2348010000001").banned, true, "dashboard sees the ban");
+  assert.equal(mgr.ban("2348010000001").ok, false, "double ban is rejected");
+  mgr.spawn("2348010000001");
+  assert.equal(mgr.children.has("2348010000001"), false, "a banned number never respawns");
+  assert.ok(mgr.unban("2348010000001").ok, "unban succeeds");
+  assert.ok(mgr.children.has("2348010000001"), "their bot comes back after unban");
+  assert.equal(mgr.unban("2348010000001").ok, false, "unban of a non-banned number is rejected");
+  assert.equal(mgr.ban("2348099999999").ok, false, "ban of an unconnected number is rejected");
+  mgr.stopAll();
+  fs.rmSync(tmp, { recursive: true, force: true });
 });
 
 await check("no reply text ever contains promotional content", async () => {

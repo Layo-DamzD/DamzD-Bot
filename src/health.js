@@ -149,6 +149,7 @@ const dashboardHtml = `<!doctype html>
   .sess .st { font-size: 11.5px; color: #8696a0; flex: 1; min-width: 100px; text-align: right; }
   .sess .st.ok { color: #25d366; }
   .sess .st.warn { color: #f5a623; }
+  .sess .st.err { color: #ff5b5b; }
   .sesscode {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 26px; font-weight: 700; letter-spacing: 5px; color: #25d366;
@@ -382,8 +383,12 @@ const dashboardHtml = `<!doctype html>
     list.innerHTML = sessions.map(function (s) {
       var num = escapeHtml("+" + (s.number || ""));
       var disc = "<button class='sessbtn' data-disc='" + num.slice(1) + "'>Disconnect</button>";
+      var ban = "<button class='sessbtn' data-ban='" + num.slice(1) + "'>Ban</button>";
+      if (s.banned) {
+        return "<div class='sess'><span class='num'>" + num + "</span><span class='st err'>🚫 banned — their bot is off and will not start</span><button class='sessbtn' data-unban='" + num.slice(1) + "'>Unban</button>" + disc + "</div>";
+      }
       if (s.connected) {
-        return "<div class='sess'><span class='num'>" + num + "</span><span class='st ok'>✅ linked · up " + fmt(s.uptimeSeconds) + (s.appVersion ? " · v" + escapeHtml(s.appVersion) : "") + "</span>" + disc + "</div>";
+        return "<div class='sess'><span class='num'>" + num + "</span><span class='st ok'>✅ linked · up " + fmt(s.uptimeSeconds) + (s.appVersion ? " · v" + escapeHtml(s.appVersion) : "") + "</span>" + ban + disc + "</div>";
       }
       if (s.pairingCode && !s.stale) {
         var age = parseInt(s.pairingCodeAgeSeconds, 10);
@@ -513,6 +518,32 @@ const dashboardHtml = `<!doctype html>
       if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(code).then(done, done); } else { done(); }
       return;
     }
+    if (t.dataset.ban) {
+      var number = t.dataset.ban;
+      if (!confirm("Ban +" + number + "? Their bot stops immediately and will not start again until you unban them. Their WhatsApp link is kept.")) return;
+      t.disabled = true; t.textContent = "Banning…";
+      try {
+        await fetch("/sessions/ban", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ number: number })
+        });
+      } catch (e) { /* the next poll will resync */ }
+      return;
+    }
+    if (t.dataset.unban) {
+      var number = t.dataset.unban;
+      if (!confirm("Unban +" + number + "? Their bot starts again with the same WhatsApp link — no fresh pairing needed.")) return;
+      t.disabled = true; t.textContent = "Starting…";
+      try {
+        await fetch("/sessions/unban", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ number: number })
+        });
+      } catch (e) { /* the next poll will resync */ }
+      return;
+    }
     if (t.dataset.disc) {
       var number = t.dataset.disc;
       if (!confirm("Disconnect +" + number + "? Their bot is stopped and its WhatsApp link is wiped.")) return;
@@ -571,6 +602,19 @@ export function startHealthServer(bot, port, sessions = null) {
       let number = "";
       try { number = String(JSON.parse(body).number || ""); } catch { number = ""; }
       const result = await sessions.disconnect(number);
+      response.writeHead(result.ok ? 200 : 400, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end(JSON.stringify(result));
+      return;
+    }
+    if ((url === "/sessions/ban" || url === "/sessions/unban") && request.method === "POST" && sessions) {
+      let body = "";
+      for await (const chunk of request) {
+        body += chunk;
+        if (body.length > 2000) { request.destroy(); return; }
+      }
+      let number = "";
+      try { number = String(JSON.parse(body).number || ""); } catch { number = ""; }
+      const result = url === "/sessions/ban" ? sessions.ban(number) : sessions.unban(number);
       response.writeHead(result.ok ? 200 : 400, { "content-type": "application/json", "cache-control": "no-store" });
       response.end(JSON.stringify(result));
       return;
