@@ -375,8 +375,14 @@ export async function processMessage(deps, sock, msg) {
     // is never treated as a prompt — that is how she used to talk over him.
     if (isBotMention(ctx, msg)) {
       if (!ctx.isOwner) {
-        await sendReceptionistReply(deps, ctx, text.replace(/@\S+/g, " ").trim() || "Hello!");
-        return;
+        // .accessmode private (the default) keeps the receptionist between
+        // group members and the AI. .accessmode public opens the AI itself:
+        // a group member's mention gets answered by the same Puter flagships
+        // the owner uses, and the boxed .menu/.help list is theirs to pull.
+        if (deps.store.get("accessmode", "private") !== "public") {
+          await sendReceptionistReply(deps, ctx, text.replace(/@\S+/g, " ").trim() || "Hello!");
+          return;
+        }
       }
       const cleaned = text.replace(/@\S+/g, " ").replace(appConfig.prefix + "\\S+", "").trim() || "Hello!";
       const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;

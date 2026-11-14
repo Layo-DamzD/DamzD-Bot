@@ -68,13 +68,15 @@ The bots are split by design: the **main bot chats on Puter's flagships** (GPT-6
 
 Voice notes are transcribed with Groq Whisper (`.vn2text`) — needs `GROQ_API_KEY`. That is the one place the main bot still touches Groq: there is no free alternative to Whisper, and transcription has a separate quota from chat.
 
+**Who gets the AI in groups — `.accessmode`** (owner only, separate from `.mode` which controls the whole bot): `private` (the default) keeps the receptionist line between group members and the AI — only the owner's mentions get answered by the brain. `public` opens it up: anyone in a group who mentions the bot gets answered by the same AI the owner uses, and the boxed `.menu`/`.help` list is theirs to pull, like on the classic megabots. Send `.accessmode` alone to see the current setting and what each side does.
+
 ## Optional keys
 
 `.song` works out of the box. `NABEES_API_KEY` (free — sign up at [apis.nabeestech.com](https://apis.nabeestech.com), or use the public free key `nabeestech`, ~100 requests/day) adds: real YouTube copies of songs the music library only has covers of, YouTube/TikTok/Instagram **video** downloads, and the backup AI models. `PUTER_AUTH_TOKEN` (free token from your Puter account) unlocks the **real flagship brains** — `.chatgpt` reads your question and auto-routes it to the best GPT-6 brain for the task (Astra for code, Sol for maths and general, Luna for quick answers), `.astra`/`.sol`/`.terra`/`.luna` hit those GPT-6 models directly, `.claude` is Claude Opus 5.5, `.fable` is Claude Fable 5.2 (the storyteller) and `.gemini` is Gemini 4 Argon. Paste several tokens separated by commas and calls rotate through them round-robin, skipping any account that is rate-limited. Automatic fallback to the built-in chain when it's absent. `.removebg` optionally takes `PHOTOROOM_API_KEY`. Without any keys every other command still works — the bot says so plainly instead of failing silently.
 
 ## What DamzD can do
 
-`.menu` shows live sections; `.menu news` opens a section. `.help` (or `.commands`) prints **every command with what it does**; `.help song` explains one command. Highlights:
+`.menu` shows the boxed section overview (DamzD header block with the live version and loaded-command count, one box per section, the Great DamzD brand line at the end); `.menu news` opens a section. `.help` (or `.commands`) prints **the full boxed megamenu — every command with what it does**; `.help song` explains one command. `.ping` answers with a boxed status card (uptime, version). Highlights:
 
 - **🤖 General** — menu, ping, alive, owner card (.vcf), time/date, jid, version
 - **💬 AI & Chat** — `.ai` plus **real per-model brains**: `.chatgpt` (smart auto-router — picks the best GPT-6 brain for the task: Astra for code, Sol for maths & general, Luna for quick answers), `.astra`, `.sol`, `.terra` and `.luna` (the GPT-6 family directly), `.claude` (Claude Opus 5.5), `.fable` (Claude Fable 5.2, the storyteller), `.gemini` (Gemini 4 Argon), `.llama` (real Llama 3.3 70B on Groq) and `.deepseek` (DeepSeek V4 Flash via the NABEES studio) — plus styled companions `.grok`, `.qwen`, `.fable5`, `.wormgpt`, `.mathgpt`, `.aidetect`, `.translate`. Real brains are labelled real; styles are labelled styles — never passed off as models they are not
