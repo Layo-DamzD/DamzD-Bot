@@ -186,8 +186,10 @@ export async function searchSong(query) {
 
 // Full song as a Buffer — prefers the 320kbps copy and quietly falls back to
 // the 96kbps one when the premium-quality link is unavailable.
-export async function downloadSong(query) {
-  const song = await searchSong(query);
+// Optional prefound: callers that already ran searchSong (to show the found
+// card before downloading) pass the metadata back in so nothing searches twice.
+export async function downloadSong(query, prefound = null) {
+  const song = prefound || await searchSong(query);
   let buffer;
   try {
     buffer = await fetchBuffer(song.url320, { timeoutMs: 180000, label: "music library" });

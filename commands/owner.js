@@ -185,6 +185,29 @@ export default [
     }
   },
   {
+    name: "accessmode",
+    hidden: true,
+    category: "Owner",
+    description: "decide who reaches my AI in groups: private (owner only) or public (everyone)",
+    run: async ctx => {
+      if (!ctx.isOwner) throw new Error("this is an owner command");
+      const wanted = String(ctx.args || "").trim().toLowerCase();
+      if (wanted !== "private" && wanted !== "public") {
+        const current = ctx.store.get("accessmode", "private");
+        await ctx.reply(
+          "Access mode is *" + current + "*, which is about who gets my AI in groups — different from .mode, which is about who uses the whole bot.\n" +
+          "Send .accessmode private — group members who mention me get the short receptionist line, only you get the AI.\n" +
+          "Send .accessmode public — group members who mention me get answered by my AI directly, and anyone can pull the command list with .menu."
+        );
+        return;
+      }
+      ctx.store.set("accessmode", wanted);
+      await ctx.reply(wanted === "public"
+        ? "🌍 Public access is on — in groups, anyone who mentions me gets my AI (the Puter flagships) directly, and the boxed .menu list is open to everybody."
+        : "🔒 Private access is on — in groups, only you get my AI; everyone else gets the receptionist line.");
+    }
+  },
+  {
     name: "setprefix",
     hidden: true,
     category: "Owner",

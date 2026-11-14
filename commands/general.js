@@ -73,7 +73,6 @@ function menuHeader(commands, config) {
   return [
     BOX_TOP + config.name + " 〕",
     BOX_LINE + "◇ " + mbold("VERSION") + ": " + APP_VERSION,
-    BOX_LINE + "◇ " + mbold("PREFIX") + ": " + config.prefix,
     BOX_LINE + "◇ " + mbold("COMMANDS LOADED") + ": " + loadedCount(commands),
     "│"
   ].join("\n");
@@ -244,7 +243,13 @@ export default [
     category: "General",
     description: "check that I am online",
     run: async ctx => {
-      await ctx.reply("I am here and running. Uptime so far: " + uptimeText() + ". 🟢");
+      await ctx.reply(
+        BOX_TOP + "⚡ " + mbold("PING") + " 〕\n" +
+        BOX_LINE + "› " + mbold("STATUS") + ": alive and answering 🟢\n" +
+        BOX_LINE + "› " + mbold("UPTIME") + ": " + uptimeText() + "\n" +
+        BOX_LINE + "› " + mbold("VERSION") + ": " + APP_VERSION + "\n" +
+        BOX_BOTTOM + "\n" + MENU_ENDING
+      );
     }
   },
   {

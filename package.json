@@ -1,6 +1,6 @@
 {
   "name": "damzd-bot",
-  "version": "1.4.20",
+  "version": "1.4.21",
   "private": true,
   "description": "DamzD \u2014 a personal WhatsApp assistant that chats like a human and runs clean commands. No footers, no ads, no spam.",
   "type": "module",

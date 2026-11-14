@@ -56,25 +56,50 @@ async function sendAudioUrl(ctx, url, title) {
   await ctx.send({ audio: { url }, mimetype: "audio/mpeg", fileName: cleanTitle(title) + ".mp3", ptt: false });
 }
 
+// Turns a raw duration — seconds from the music library or a "3:45" string
+// from YouTube — into a plain minutes count for the found card.
+function durationMinutes(value) {
+  if (typeof value === "number" && isFinite(value) && value > 0) {
+    return Math.max(1, Math.round(value / 60));
+  }
+  const match = String(value || "").match(/^(\d+):(\d{1,2})/);
+  if (match) return Math.max(1, Math.round(Number(match[1]) + Number(match[2]) / 60));
+  return null;
+}
+
+// The found card: what matched (title, artist when known), the rough length,
+// and the honest "download in progress" line before the bytes move.
+async function announceFound(ctx, song) {
+  const minutes = durationMinutes(song.duration);
+  const lines = ["✅ Found it: " + (song.artist ? song.artist + " — " : "") + song.title];
+  if (minutes) lines.push("⏱️ About " + minutes + " minute" + (minutes === 1 ? "" : "s") + " long.");
+  lines.push("⬇️ Download in progress — sending the audio in a moment…");
+  await ctx.reply(lines.join("\n"));
+}
+
 async function sendSong(ctx, query) {
-  const { downloadSong } = await import("../src/saavn.js");
+  const { searchSong, downloadSong } = await import("../src/saavn.js");
   const { identifyTrack } = await import("../src/apis.js");
+  await ctx.reply("🔍 Searching the music libraries for *" + query + "* …");
   let song = null;
   try {
-    song = await downloadSong(query);
+    song = await searchSong(query); // metadata first — bytes only after the found card
   } catch {
     song = null;
   }
-  if (song?.artistVerified) {
-    await ctx.typing(800);
-    return sendAudioBuffer(ctx, song);
-  }
-  if (song && !song.expectedArtist) {
-    await ctx.typing(800);
-    return sendAudioBuffer(ctx, song);
+  if (song && (song.artistVerified || !song.expectedArtist)) {
+    await announceFound(ctx, song);
+    try {
+      const full = await downloadSong(query, song);
+      await ctx.typing(800);
+      return sendAudioBuffer(ctx, full);
+    } catch {
+      /* the library copy failed to transfer — fall through to YouTube */
+    }
   }
   try {
     const result = await searchYouTubeAudio(query);
+    await announceFound(ctx, { title: result.title });
     await ctx.typing(800);
     return await sendAudioUrl(ctx, result.url, result.title);
   } catch {
@@ -84,6 +109,7 @@ async function sendSong(ctx, query) {
     try {
       const found = await searchYouTubeNabees(query);
       const audio = await resolveYouTubeAudioNabees(found.url);
+      await announceFound(ctx, { title: audio.title || found.title });
       await ctx.typing(800);
       return await sendAudioUrl(ctx, audio.url, audio.title || found.title);
     } catch {

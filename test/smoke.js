@@ -90,12 +90,15 @@ async function check(label, fn) {
 
 console.log("DamzD smoke test (" + commands.length + " commands loaded)");
 
-await check("ping command reacts ⚡ then replies with uptime", async () => {
+await check("ping draws the boxed status card in the megamenu style", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".ping"));
   assert.ok(sent.some(item => item.content?.react?.text === "⚡"), "command should get a ⚡ reaction");
   const reply = sent.map(item => item.content.text || "").find(Boolean) || "";
-  assert.match(reply, /here and running/);
+  assert.match(reply, /╭──〔 ⚡ 𝗣𝗜𝗡𝗚 〕/);
+  assert.match(reply, /alive and answering/);
+  assert.match(reply, /𝗨𝗣𝗧𝗜𝗠𝗘: /);
+  assert.match(reply, /✦ 𝗣𝗢𝗪𝗘𝗥𝗘𝗗 𝗕𝗬 𝗚𝗥𝗘𝗔𝗧 𝗗𝗔𝗠𝗭𝗗/);
 });
 
 await check("menu shows the boxed section overview with the Great DamzD ending", async () => {
@@ -104,7 +107,7 @@ await check("menu shows the boxed section overview with the Great DamzD ending",
   const text = sent.map(item => item.content.text || "").join("\n");
   assert.match(text, /╭──〔 DamzD 〕/, "the header box carries the bot name");
   assert.match(text, /𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦 𝗟𝗢𝗔𝗗𝗘𝗗: \d+/, "live loaded-command count");
-  assert.match(text, /𝗣𝗥𝗘𝗙𝗜𝗫: \./);
+  assert.ok(!/𝗣𝗥𝗘𝗙𝗜𝗫/.test(text), "no prefix row in the header — removed as requested");
   assert.match(text, /𝗡𝗘𝗪𝗦/, "News section listed");
   assert.match(text, /𝗙𝗨𝗡/, "Fun section listed");
   assert.ok(!/𝗔𝗡𝗜𝗠𝗘/.test(text), "the anime section is gone as requested");
@@ -363,6 +366,61 @@ await check("non-owner group mention gets the receptionist in public mode", asyn
   assert.match(reply, /he is free/);
   assert.equal(groqCalls.length, 0);
   setAccessMode("self");
+});
+
+await check(".accessmode public opens the AI to group members, private closes it", async () => {
+  setAccessMode("public");
+  deps.store.set("accessmode", "public");
+  sent.length = 0;
+  groqCalls.length = 0;
+  deps.ownerActivity.delete("123@g.us");
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  const ask = textMessage("@2348000000002 who is this?", { jid: "123@g.us", fromMe: false });
+  ask.key.participant = "2348555000009@s.whatsapp.net";
+  ask.message = {
+    extendedTextMessage: {
+      text: "@2348000000002 who is this?",
+      contextInfo: { mentionedJid: ["2348000000002@s.whatsapp.net"] }
+    }
+  };
+  await processMessage(deps, nonOwnerSock, ask);
+  const reply = sent.map(item => item.content?.text || "").find(Boolean) || "";
+  assert.match(reply, /Good evening/, "in public mode the AI answers the member directly");
+  assert.equal(groqCalls.length, 1, "the AI brain ran, not the receptionist");
+  // and the boxed list is theirs to pull, like on the classic bots
+  sent.length = 0;
+  const memberMenu = textMessage(".menu", { jid: "123@g.us", fromMe: false });
+  memberMenu.key.participant = "2348555000009@s.whatsapp.net";
+  await processMessage(deps, nonOwnerSock, memberMenu);
+  const menu = sent.map(item => item.content?.text || "").join("\n");
+  assert.match(menu, /╭──〔 DamzD 〕/, "a group member pulls the boxed list");
+  assert.match(menu, /✦ 𝗣𝗢𝗪𝗘𝗥𝗘𝗗 𝗕𝗬 𝗚𝗥𝗘𝗔𝗧 𝗗𝗔𝗠𝗭𝗗/);
+  // back to private: the same mention gets the receptionist again
+  deps.store.set("accessmode", "private");
+  sent.length = 0;
+  groqCalls.length = 0;
+  deps.ownerActivity.delete("123@g.us");
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  // a fresh message object — the bot skips message ids it has already handled
+  const ask2 = textMessage("@2348000000002 who is this?", { jid: "123@g.us", fromMe: false });
+  ask2.key.participant = "2348555000009@s.whatsapp.net";
+  ask2.message = {
+    extendedTextMessage: {
+      text: "@2348000000002 who is this?",
+      contextInfo: { mentionedJid: ["2348000000002@s.whatsapp.net"] }
+    }
+  };
+  await processMessage(deps, nonOwnerSock, ask2);
+  const quiet = sent.map(item => item.content?.text || "").find(Boolean) || "";
+  assert.match(quiet, /he is free/, "private mode restores the receptionist");
+  assert.equal(groqCalls.length, 0, "no AI call in private mode");
+  setAccessMode("self");
+});
+
+await check(".song asks for a query when none is given", async () => {
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".song"));
+  assert.match(firstText(), /tell me the song or artist name/);
 });
 
 await check("non-owner group message without mention stays quiet", async () => {
