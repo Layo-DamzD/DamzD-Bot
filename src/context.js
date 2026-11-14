@@ -42,8 +42,28 @@ export function createContext({ sock, msg, config, store, memory, sessions = nul
     pushName: String(msg.pushName || "").slice(0, 60),
 
     async reply(text, extra = {}) {
-      const payload = { text: String(text).slice(0, 4000), ...extra };
-      return sock.sendMessage(jid, payload);
+      // WhatsApp trusts long texts up to ~65k, but huge single messages render
+      // badly on some phones — so a long reply (the .help megamenu) goes out
+      // as sequential chunks, split between lines, never mid-sentence.
+      const full = String(text);
+      const LIMIT = 3800;
+      if (full.length <= LIMIT) {
+        return sock.sendMessage(jid, { text: full, ...extra });
+      }
+      const chunks = [];
+      let rest = full;
+      while (rest.length > LIMIT) {
+        let cut = rest.lastIndexOf("\n", LIMIT);
+        if (cut < 500) cut = LIMIT;
+        chunks.push(rest.slice(0, cut));
+        rest = rest.slice(cut).replace(/^\n+/, "");
+      }
+      if (rest) chunks.push(rest);
+      let last = null;
+      for (const chunk of chunks) {
+        last = await sock.sendMessage(jid, { text: chunk, ...extra });
+      }
+      return last;
     },
 
     async send(content) {

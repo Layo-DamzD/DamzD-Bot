@@ -98,24 +98,42 @@ await check("ping command reacts ⚡ then replies with uptime", async () => {
   assert.match(reply, /here and running/);
 });
 
-await check("menu shows section overview without any promo footer", async () => {
+await check("menu shows the boxed section overview with the Great DamzD ending", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".menu"));
   const text = sent.map(item => item.content.text || "").join("\n");
-  assert.match(text, /Here is everything I can do/);
-  assert.match(text, /\*News\*/);
-  assert.match(text, /\*Fun\*/);
-  assert.ok(!/\*Anime\*/.test(text), "the anime section is gone as requested");
-  assert.ok(!/\*Canvas\*/.test(text), "the fake-generator canvas section is gone as requested");
-  assert.ok(!/powered by|pairing portal|benfei/i.test(text), "no promotional text allowed");
+  assert.match(text, /╭──〔 DamzD 〕/, "the header box carries the bot name");
+  assert.match(text, /𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦 𝗟𝗢𝗔𝗗𝗘𝗗: \d+/, "live loaded-command count");
+  assert.match(text, /𝗣𝗥𝗘𝗙𝗜𝗫: \./);
+  assert.match(text, /𝗡𝗘𝗪𝗦/, "News section listed");
+  assert.match(text, /𝗙𝗨𝗡/, "Fun section listed");
+  assert.ok(!/𝗔𝗡𝗜𝗠𝗘/.test(text), "the anime section is gone as requested");
+  assert.ok(!/𝗖𝗔𝗡𝗩𝗔𝗦/.test(text), "the fake-generator canvas section is gone as requested");
+  assert.ok(!/benfei|pairing portal/i.test(text), "no third-party promotional text allowed");
+  assert.match(text, /✦ 𝗣𝗢𝗪𝗘𝗥𝗘𝗗 𝗕𝗬 𝗚𝗥𝗘𝗔𝗧 𝗗𝗔𝗠𝗭𝗗/, "the ending the owner asked for");
 });
 
 await check("menu section opens with full command list", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".menu news"));
   const text = sent.at(-1).content.text;
-  assert.match(text, /\*News\*/);
+  assert.match(text, /╭──〔 📰 𝗡𝗘𝗪𝗦 〕/);
   assert.match(text, /\.bbc — /);
+  assert.match(text, /✦ 𝗣𝗢𝗪𝗘𝗥𝗘𝗗 𝗕𝗬 𝗚𝗥𝗘𝗔𝗧 𝗗𝗔𝗠𝗭𝗗/);
+});
+
+await check(".help draws the full boxed megamenu like the classic bots", async () => {
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".help"));
+  // long replies may be chunked — read every piece, not just the tail
+  const text = sent.map(item => item.content?.text || "").join("\n");
+  assert.match(text, /╭──〔 DamzD 〕/);
+  assert.match(text, /╭──〔 🤖 𝗚𝗘𝗡𝗘𝗥𝗔𝗟 〕/);
+  assert.match(text, /╰────────────────/);
+  assert.match(text, /\.voices — /, "the new voices command is listed");
+  assert.match(text, /\.tts — /);
+  assert.ok(!/𝗔𝗡𝗜𝗠𝗘/.test(text), "no anime section in the megamenu");
+  assert.match(text, /✦ 𝗣𝗢𝗪𝗘𝗥𝗘𝗗 𝗕𝗬 𝗚𝗥𝗘𝗔𝗧 𝗗𝗔𝗠𝗭𝗗/, "ends with the brand line");
 });
 
 await check("the expanded command set loaded with clean aliases", async () => {
@@ -490,6 +508,33 @@ await check(".ban from chat stops a connected friend's bot and .unban revives it
     sent.length = 0;
     await processMessage(deps, ownerSock, textMessage(".unban 2348111122222"));
     assert.match(firstText(), /can use me again/);
+  } finally {
+    delete deps.sessions;
+    mgr.stopAll();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+await check(".disconnect from chat wipes a connected friend's session", async () => {
+  const path = await import("node:path");
+  const os = await import("node:os");
+  const { SessionManager } = await import("../src/sessions.js");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "damzd-disc-cmd-"));
+  const dummy = path.join(tmp, "dummy.js");
+  fs.writeFileSync(dummy, "setTimeout(function(){}, 6e10);");
+  const mgr = new SessionManager({ dataDirectory: tmp, entryPath: dummy });
+  await mgr.connect("08010000004");
+  deps.sessions = mgr;
+  try {
+    sent.length = 0;
+    await processMessage(deps, ownerSock, textMessage(".disconnect 08010000004"));
+    assert.match(firstText(), /disconnected — their bot is stopped and the WhatsApp link is wiped/);
+    assert.equal(mgr.children.has("2348010000004"), false, "their bot process is dead");
+    assert.equal(mgr.readStatuses().some(row => row.number === "2348010000004"), false, "the session is gone from the registry, not just banned");
+    // a number that never connected gets a friendly pointer to .ban instead
+    sent.length = 0;
+    await processMessage(deps, ownerSock, textMessage(".disconnect 2348099999999"));
+    assert.match(firstText(), /no connected bot here/);
   } finally {
     delete deps.sessions;
     mgr.stopAll();

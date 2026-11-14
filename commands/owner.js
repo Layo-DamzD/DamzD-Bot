@@ -168,6 +168,23 @@ export default [
     }
   },
   {
+    name: "disconnect",
+    hidden: true,
+    category: "Owner",
+    description: "stop a connected friend's bot and wipe its WhatsApp link (they must pair fresh to return)",
+    run: async ctx => {
+      if (!ctx.isOwner) throw new Error("this is an owner command");
+      const number = String(ctx.args || "").replace(/[^0-9]/g, "");
+      if (!number) throw new Error("send the number to disconnect — their bot stops and the WhatsApp link is wiped");
+      if (!ctx.sessions?.has(number)) {
+        throw new Error("+" + number + " has no connected bot here — banning them instead works with .ban " + number);
+      }
+      const result = await ctx.sessions.disconnect(number);
+      if (!result.ok) throw new Error(result.error);
+      await ctx.reply("🔌 +" + result.number + " is disconnected — their bot is stopped and the WhatsApp link is wiped. They can pair fresh from the dashboard whenever you allow it.");
+    }
+  },
+  {
     name: "setprefix",
     hidden: true,
     category: "Owner",
