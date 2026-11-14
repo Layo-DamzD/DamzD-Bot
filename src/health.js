@@ -382,23 +382,22 @@ const dashboardHtml = `<!doctype html>
     }
     list.innerHTML = sessions.map(function (s) {
       var num = escapeHtml("+" + (s.number || ""));
-      var disc = "<button class='sessbtn' data-disc='" + num.slice(1) + "'>Disconnect</button>";
-      // Ban and Unban live in chat only: .ban <number> / .unban <number> from
-      // the owner's WhatsApp. The dashboard shows the status read-only.
+      // The card is read-only: ban and disconnect both live in chat
+      // (.ban / .unban / .disconnect from the owner's WhatsApp).
       if (s.banned) {
-        return "<div class='sess'><span class='num'>" + num + "</span><span class='st err'>🚫 banned — their bot is off and will not start (unban with .unban " + num.slice(1) + " in chat)</span>" + disc + "</div>";
+        return "<div class='sess'><span class='num'>" + num + "</span><span class='st err'>🚫 banned — their bot is off and will not start (unban with .unban " + num.slice(1) + " in chat)</span></div>";
       }
       if (s.connected) {
-        return "<div class='sess'><span class='num'>" + num + "</span><span class='st ok'>✅ linked · up " + fmt(s.uptimeSeconds) + (s.appVersion ? " · v" + escapeHtml(s.appVersion) : "") + "</span>" + disc + "</div>";
+        return "<div class='sess'><span class='num'>" + num + "</span><span class='st ok'>✅ linked · up " + fmt(s.uptimeSeconds) + (s.appVersion ? " · v" + escapeHtml(s.appVersion) : "") + "</span></div>";
       }
       if (s.pairingCode && !s.stale) {
         var age = parseInt(s.pairingCodeAgeSeconds, 10);
         var left = isNaN(age) ? 60 : Math.max(0, 60 - age);
-        return "<div class='sess'><span class='num'>" + num + "</span><span class='st warn'>waiting for that phone · code dies in " + left + "s</span>" + disc + "</div>" +
+        return "<div class='sess'><span class='num'>" + num + "</span><span class='st warn'>waiting for that phone · code dies in " + left + "s</span></div>" +
           "<div class='sesscode'>" + escapeHtml(s.pairingCode) + "</div>" +
           "<button class='sesscopy' data-copy='" + escapeHtml(s.pairingCode) + "'>Copy code for " + num + "</button>";
       }
-      return "<div class='sess'><span class='num'>" + num + "</span><span class='st " + (s.stale ? "warn" : "") + "'>" + (s.stale ? "restarting…" : "starting up — the pairing code lands in a few seconds…") + "</span>" + disc + "</div>";
+      return "<div class='sess'><span class='num'>" + num + "</span><span class='st " + (s.stale ? "warn" : "") + "'>" + (s.stale ? "restarting…" : "starting up — the pairing code lands in a few seconds…") + "</span></div>";
     }).join("");
   }
   async function tick() {
@@ -519,18 +518,6 @@ const dashboardHtml = `<!doctype html>
       if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(code).then(done, done); } else { done(); }
       return;
     }
-    if (t.dataset.disc) {
-      var number = t.dataset.disc;
-      if (!confirm("Disconnect +" + number + "? Their bot is stopped and its WhatsApp link is wiped.")) return;
-      t.disabled = true; t.textContent = "Removing…";
-      try {
-        await fetch("/sessions/disconnect", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ number: number })
-        });
-      } catch (e) { /* the next poll will resync */ }
-    }
   });
 </script>
 </body>
@@ -564,19 +551,6 @@ export function startHealthServer(bot, port, sessions = null) {
       let number = "";
       try { number = String(JSON.parse(body).number || ""); } catch { number = ""; }
       const result = await sessions.connect(number);
-      response.writeHead(result.ok ? 200 : 400, { "content-type": "application/json", "cache-control": "no-store" });
-      response.end(JSON.stringify(result));
-      return;
-    }
-    if (url === "/sessions/disconnect" && request.method === "POST" && sessions) {
-      let body = "";
-      for await (const chunk of request) {
-        body += chunk;
-        if (body.length > 2000) { request.destroy(); return; }
-      }
-      let number = "";
-      try { number = String(JSON.parse(body).number || ""); } catch { number = ""; }
-      const result = await sessions.disconnect(number);
       response.writeHead(result.ok ? 200 : 400, { "content-type": "application/json", "cache-control": "no-store" });
       response.end(JSON.stringify(result));
       return;

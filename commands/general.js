@@ -1,4 +1,55 @@
-function buildCategoryOverview(commands, prefix) {
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const APP_VERSION = (() => {
+  try { return String(JSON.parse(fs.readFileSync(path.join(here, "../package.json"), "utf8")).version); }
+  catch { return "dev"; }
+})();
+
+// The menu boxes. DamzD's own look, drawn the same way the classic megabots
+// draw theirs: a header block with the live version, prefix and loaded
+// command count, then one box per section, then the brand line.
+const BOX_TOP = "╭──〔 ";
+const BOX_LINE = "│  ";
+const BOX_BOTTOM = "╰────────────────";
+const MENU_ENDING = "✦ " + mbold("POWERED BY GREAT DAMZD");
+
+const ICONS = {
+  General: "🤖",
+  "AI & Chat": "💬",
+  "AI Media": "🎨",
+  News: "📰",
+  Downloads: "📥",
+  Games: "🎮",
+  Fun: "🎉",
+  Group: "👥",
+  Canvas: "🖼",
+  Tools: "🛠",
+  Privacy: "🔒",
+  Status: "📱",
+  Channel: "📢",
+  Owner: "👑"
+};
+
+// Mathematical Sans-Serif Bold — 𝗹𝗶𝗸𝗲 𝘁𝗵𝗶𝘀. Plain punctuation (spaces,
+// dots, dashes, &) passes through untouched.
+function mbold(text) {
+  return String(text).split("").map(ch => {
+    const code = ch.codePointAt(0);
+    if (code >= 65 && code <= 90) return String.fromCodePoint(0x1d5d4 + code - 65);
+    if (code >= 97 && code <= 122) return String.fromCodePoint(0x1d5ee + code - 97);
+    if (code >= 48 && code <= 57) return String.fromCodePoint(0x1d7ec + code - 48);
+    return ch;
+  }).join("");
+}
+
+function capitalize(text) {
+  return String(text || "").charAt(0).toUpperCase() + String(text || "").slice(1);
+}
+
+function groupedCategories(commands) {
   const categories = new Map();
   for (const command of commands) {
     if (command.hidden) continue;
@@ -6,131 +57,82 @@ function buildCategoryOverview(commands, prefix) {
     list.push(command);
     categories.set(command.category, list);
   }
-  const icons = {
-    General: "🤖",
-    "AI & Chat": "💬",
-    "AI Media": "🎨",
-    News: "📰",
-    Downloads: "📥",
-    Games: "🎮",
-    Fun: "🎉",
-    Group: "👥",
-    Canvas: "🖼",
-    Tools: "🛠",
-    Privacy: "🔒",
-    Status: "📱",
-    Channel: "📢",
-    Owner: "👑"
-  };
-  const lines = [
-    "Here is everything I can do — " + commands.filter(command => !command.hidden).length +
-    " commands in " + categories.size + " sections.",
+  return categories;
+}
+
+function sectionTitle(category) {
+  return BOX_TOP + (ICONS[category] || "•") + " " + mbold(String(category).toUpperCase()) + " 〕";
+}
+
+// Everything registered, aliases included — that is what "loaded" means here.
+function loadedCount(commands) {
+  return commands.reduce((total, command) => total + 1 + (command.aliases?.length || 0), 0);
+}
+
+function menuHeader(commands, config) {
+  return [
+    BOX_TOP + config.name + " 〕",
+    BOX_LINE + "◇ " + mbold("VERSION") + ": " + APP_VERSION,
+    BOX_LINE + "◇ " + mbold("PREFIX") + ": " + config.prefix,
+    BOX_LINE + "◇ " + mbold("COMMANDS LOADED") + ": " + loadedCount(commands),
+    "│"
+  ].join("\n");
+}
+
+function buildCategoryOverview(commands, config) {
+  const categories = groupedCategories(commands);
+  const lines = [menuHeader(commands, config)];
+  lines.push(BOX_TOP + "⌂ " + mbold("SECTIONS") + " 〕");
+  for (const [category, list] of categories.entries()) {
+    lines.push(BOX_LINE + "› " + (ICONS[category] || "•") + " " +
+      mbold(String(category).toUpperCase()) + " — " + list.length +
+      (list.length === 1 ? " command" : " commands"));
+  }
+  lines.push(
+    BOX_BOTTOM,
     "",
-    "Send " + prefix + "menu <section name> to open one, e.g. " + prefix + "menu news.",
-    ""
-  ];
-  for (const [category, list] of categories.entries()) {
-    lines.push((icons[category] || "•") + " *" + category + "* — " + list.length + " commands");
-  }
-  lines.push("");
-  lines.push("Beyond commands: just talk to me in a normal message and I will reply like a person would.");
-  lines.push("Send me a TikTok, YouTube, Instagram or Facebook link and I will fetch the media for you.");
-  return lines.join("\n");
+    "Send " + config.prefix + "menu <section> to open one — e.g. " + config.prefix + "menu news.",
+    "Beyond commands: just talk to me in a normal message and I will reply like a person would.",
+    "Send me a TikTok, YouTube, Instagram or Facebook link and I will fetch the media for you."
+  );
+  return lines.join("\n") + "\n\n" + MENU_ENDING;
 }
 
-function buildFullList(commands, prefix) {
-  const categories = new Map();
-  for (const command of commands) {
-    if (command.hidden) continue;
-    const list = categories.get(command.category) || [];
-    list.push(command);
-    categories.set(command.category, list);
-  }
-  const icons = {
-    General: "🤖",
-    "AI & Chat": "💬",
-    "AI Media": "🎨",
-    News: "📰",
-    Downloads: "📥",
-    Games: "🎮",
-    Fun: "🎉",
-    Group: "👥",
-    Canvas: "🖼",
-    Tools: "🛠",
-    Privacy: "🔒",
-    Status: "📱",
-    Channel: "📢",
-    Owner: "👑"
-  };
-  const lines = [
-    "*Everything I can do — " + commands.filter(command => !command.hidden).length + " commands*",
-    ""
-  ];
-  for (const [category, list] of categories.entries()) {
-    lines.push((icons[category] || "•") + " *" + category + "*");
+function buildFullList(commands, config) {
+  const boxes = [menuHeader(commands, config)];
+  for (const [category, list] of groupedCategories(commands).entries()) {
+    boxes.push(sectionTitle(category));
     for (const command of list) {
-      const aliases = (command.aliases || []).length
-        ? " (or " + command.aliases.map(a => prefix + a).join(", ") + ")"
-        : "";
-      lines.push("  " + prefix + command.name + " — " + command.description + aliases);
+      boxes.push(BOX_LINE + "› " + config.prefix + command.name + " — " + capitalize(command.description));
     }
-    lines.push("");
+    boxes.push(BOX_BOTTOM);
   }
-  lines.push("And you can always just talk to me normally.");
-  return lines.join("\n").trim();
+  boxes.push("", "And you can always just talk to me normally.", "", MENU_ENDING);
+  return boxes.join("\n");
 }
 
-function buildCommandDetail(commands, prefix, wanted) {
+function buildCommandDetail(commands, config, wanted) {
   const lower = String(wanted || "").toLowerCase().replace(/^\./, "").trim();
-  const icons = {
-    General: "🤖",
-    "AI & Chat": "💬",
-    "AI Media": "🎨",
-    News: "📰",
-    Downloads: "📥",
-    Games: "🎮",
-    Fun: "🎉",
-    Group: "👥",
-    Canvas: "🖼",
-    Tools: "🛠",
-    Privacy: "🔒",
-    Status: "📱",
-    Channel: "📢",
-    Owner: "👑"
-  };
   for (const command of commands) {
     if (command.hidden) continue;
     const names = [command.name, ...(command.aliases || [])];
     if (!names.includes(lower)) continue;
-    const aliases = (command.aliases || []).length
-      ? "\nAlso answers to: " + command.aliases.map(a => prefix + a).join(", ")
-      : "";
-    return (
-      (icons[command.category] || "•") + " *" + prefix + command.name + "* — " + command.category + "\n" +
-      command.description + aliases
-    );
+    const lines = [
+      BOX_TOP + (ICONS[command.category] || "•") + " " + config.prefix + mbold(command.name.toUpperCase()) + " 〕",
+      BOX_LINE + "› " + capitalize(command.description),
+      BOX_LINE + "› " + mbold("CATEGORY") + ": " + command.category
+    ];
+    if ((command.aliases || []).length) {
+      lines.push(BOX_LINE + "› " + mbold("ALSO") + ": " + command.aliases.map(a => config.prefix + a).join(", "));
+    }
+    lines.push(BOX_BOTTOM);
+    return lines.join("\n");
   }
   return null;
 }
 
-function buildSection(commands, prefix, wanted) {
+function buildSection(commands, config, wanted) {
   const lower = String(wanted || "").trim().toLowerCase();
-  const icons = {
-    General: "🤖",
-    "AI & Chat": "💬",
-    "AI Media": "🎨",
-    News: "📰",
-    Downloads: "📥",
-    Games: "🎮",
-    Fun: "🎉",
-    Group: "👥",
-    Canvas: "🖼",
-    Tools: "🛠",
-    Privacy: "🔒",
-    Status: "📱",
-    Channel: "📢",
-    Owner: "👑"
-  };
   const matches = new Map();
   for (const command of commands) {
     if (command.hidden) continue;
@@ -139,15 +141,15 @@ function buildSection(commands, prefix, wanted) {
     }
   }
   if (!matches.size) return null;
-  const lines = [];
+  const boxes = [];
   for (const [category, list] of matches.entries()) {
-    lines.push((icons[category] || "•") + " *" + category + "*");
+    boxes.push(sectionTitle(category));
     for (const command of list) {
-      const aliases = (command.aliases || []).length ? " (or " + command.aliases.map(a => prefix + a).join(", ") + ")" : "";
-      lines.push("  " + prefix + command.name + " — " + command.description + aliases);
+      boxes.push(BOX_LINE + "› " + config.prefix + command.name + " — " + capitalize(command.description));
     }
+    boxes.push(BOX_BOTTOM);
   }
-  return lines.join("\n");
+  return boxes.join("\n") + "\n\n" + MENU_ENDING;
 }
 
 function lagosTime() {
@@ -201,14 +203,14 @@ export default [
     description: "show my sections at a glance",
     run: async ctx => {
       const wanted = String(ctx.args || "").trim();
-      const section = wanted ? buildSection(ctx.commands, ctx.config.prefix, wanted) : null;
+      const section = wanted ? buildSection(ctx.commands, ctx.config, wanted) : null;
       if (wanted && !section) {
         await ctx.reply(
           "I do not have a section called *" + wanted + "*. Send " + ctx.config.prefix + "menu to see the list of sections."
         );
         return;
       }
-      await ctx.reply(section || buildCategoryOverview(ctx.commands, ctx.config.prefix));
+      await ctx.reply(section || buildCategoryOverview(ctx.commands, ctx.config));
     }
   },
   {
@@ -219,15 +221,15 @@ export default [
     run: async ctx => {
       const wanted = String(ctx.args || "").trim();
       if (!wanted) {
-        await ctx.reply(buildFullList(ctx.commands, ctx.config.prefix));
+        await ctx.reply(buildFullList(ctx.commands, ctx.config));
         return;
       }
-      const detail = buildCommandDetail(ctx.commands, ctx.config.prefix, wanted);
+      const detail = buildCommandDetail(ctx.commands, ctx.config, wanted);
       if (detail) {
         await ctx.reply(detail);
         return;
       }
-      const section = buildSection(ctx.commands, ctx.config.prefix, wanted);
+      const section = buildSection(ctx.commands, ctx.config, wanted);
       if (section) {
         await ctx.reply(section);
         return;
