@@ -21,6 +21,7 @@ import { WELCOME_ON, GOODBYE_ON, ANTILINK_ON } from "./store.js";
 import { registerCallHook, runSideEffects, recordActivity } from "./hooks.js";
 import { HARD_PAUSED, PAUSE_NOTE } from "./flags.js";
 import { resolveJidNumber } from "./lidmap.js";
+import { stashViewOnce } from "./viewonce.js";
 
 const MAX_PROCESSED_IDS = 2000;
 const AI_COOLDOWN_MS = 2500;
@@ -254,6 +255,10 @@ export async function processMessage(deps, sock, msg) {
   if (!msg?.message || !msg?.key?.remoteJid) return;
   const jid = String(msg.key.remoteJid);
   if (jid === "status@broadcast" || jid.endsWith("@newsletter")) return;
+  // Remember every view-once the bot can legitimately see (its own chats and
+  // the groups it is in) — the recovery command matches quoted copies back to
+  // these by stanza id, because quotes arrive with the media metadata stripped.
+  stashViewOnce(msg);
 
   const id = String(msg.key.id || "");
   if (id) {

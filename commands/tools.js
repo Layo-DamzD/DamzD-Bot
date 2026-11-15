@@ -8,11 +8,19 @@ function pickReply(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+async function downloadNode(node, kind) {
+  const stream = await downloadContentFromMessage(node, kind === "sticker" ? "sticker" : kind);
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
 async function quotedMedia(ctx, { allowDocument = true } = {}) {
   const info = ctx.msg.message?.extendedTextMessage?.contextInfo;
   const quoted = info?.quotedMessage;
   if (!quoted) throw new Error("reply to the message with the media");
   const { unwrapMessage } = await import("../src/utils.js");
+  const { findCachedViewOnce } = await import("../src/viewonce.js");
   const inner = unwrapMessage(quoted);
   const kinds = [
     ["imageMessage", "image"],
@@ -23,13 +31,22 @@ async function quotedMedia(ctx, { allowDocument = true } = {}) {
   ];
   for (const [key, kind] of kinds) {
     const node = inner[key];
-    if (node) {
-      const stream = await downloadContentFromMessage(node, kind === "sticker" ? "sticker" : kind);
-      const chunks = [];
-      for await (const chunk of stream) chunks.push(chunk);
-      return { buffer: Buffer.concat(chunks), kind, node };
+    if (!node) continue;
+    try {
+      return { buffer: await downloadNode(node, kind), kind, node };
+    } catch (error) {
+      // Quotes of a view-once arrive with the media URL and directPath
+      // stripped by WhatsApp, so the download can only fail. If the bot saw
+      // the original view-once in this chat, the cache still holds the full
+      // metadata — match it back by the quoted stanza id and download that.
+      const cached = findCachedViewOnce(ctx.jid, info?.stanzaId);
+      if (cached) return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
+      throw error;
     }
   }
+  // A stripped quote can lose the media node entirely — try the cache first.
+  const cached = findCachedViewOnce(ctx.jid, info?.stanzaId);
+  if (cached) return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
   throw new Error("I could not find any image, video or sticker in that message");
 }
 

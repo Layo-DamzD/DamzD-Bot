@@ -423,6 +423,65 @@ await check(".song asks for a query when none is given", async () => {
   assert.match(firstText(), /tell me the song or artist name/);
 });
 
+await check("view-once stanzas are cached so anyone can recover what the bot could see", async () => {
+  const { stashViewOnce, findCachedViewOnce, viewOnceCacheSize } = await import("../src/viewonce.js");
+  // A member sends the bot a view-once photo in their DM — the raw stanza
+  // carries the full media metadata even though no client may re-show it.
+  const vo = {
+    key: { remoteJid: "2348777666555@s.whatsapp.net", fromMe: false, id: "VONCE-TEST-1" },
+    message: {
+      viewOnceMessageV2: {
+        message: { imageMessage: { url: "https://mmg.whatsapp.net/v/t62.7118-24/test", directPath: "/v/t62.7118-24/test", mediaKey: "abc=", mimetype: "image/jpeg" } }
+      }
+    }
+  };
+  await processMessage(deps, nonOwnerSock, vo);
+  const hit = findCachedViewOnce("2348777666555@s.whatsapp.net", "VONCE-TEST-1");
+  assert.ok(hit, "the view-once stanza is remembered");
+  assert.equal(hit.kind, "image");
+  assert.equal(findCachedViewOnce("2348777666555@s.whatsapp.net", "NOT-THE-ONE"), null, "a wrong stanza id finds nothing");
+  // The cache stays bounded — 200 entries, oldest evicted first.
+  for (let i = 0; i < 205; i += 1) {
+    stashViewOnce({
+      key: { remoteJid: "2348000000009@s.whatsapp.net", id: "FLOOD-" + i },
+      message: { viewOnceMessage: { message: { imageMessage: { mimetype: "image/jpeg" } } } }
+    });
+  }
+  assert.ok(viewOnceCacheSize() <= 200, "the cache prunes itself");
+});
+
+await check(".Ggs recovery failures stay silent for members and note the owner only", async () => {
+  setAccessMode("public");
+  // A member quotes a view-once whose stanza the bot never saw (it was sent
+  // in a chat the bot is not part of): nothing may leak — no reply anywhere.
+  sent.length = 0;
+  const strangerQuote = textMessage(".Ggs", { jid: "2348777666555@s.whatsapp.net", fromMe: false });
+  strangerQuote.key.participant = "2348777666555@s.whatsapp.net";
+  strangerQuote.message = {
+    extendedTextMessage: {
+      text: ".Ggs",
+      contextInfo: { stanzaId: "FOREIGN-STANZA-9", quotedMessage: { viewOnceMessageV2: { message: { imageMessage: { mimetype: "image/jpeg" } } } } }
+    }
+  };
+  await processMessage(deps, nonOwnerSock, strangerQuote);
+  const memberTexts = sent.filter(item => item.content?.text);
+  assert.equal(memberTexts.length, 0, "a failed recovery never tells the room");
+  // The owner quoting an un-cached, stripped view-once gets the quiet note
+  // in their own chat — the old failure path, unchanged.
+  sent.length = 0;
+  const ownerQuote = textMessage(".Ggs", { jid: "2348000000001@s.whatsapp.net", fromMe: true });
+  ownerQuote.message = {
+    extendedTextMessage: {
+      text: ".Ggs",
+      contextInfo: { stanzaId: "FOREIGN-STANZA-9", quotedMessage: { viewOnceMessageV2: { message: { imageMessage: { mimetype: "image/jpeg" } } } } }
+    }
+  };
+  await processMessage(deps, ownerSock, ownerQuote);
+  const note = sent.map(item => item.content?.text || "").find(Boolean) || "";
+  assert.match(note, /could not recover that one/, "the owner still gets the failure note");
+  setAccessMode("self");
+});
+
 await check("non-owner group message without mention stays quiet", async () => {
   sent.length = 0;
   groqCalls.length = 0;
