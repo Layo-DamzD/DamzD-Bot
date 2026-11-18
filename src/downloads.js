@@ -1,10 +1,19 @@
 import { fetchJson, isHttpsUrl } from "./utils.js";
 
 const AIO_API = "https://apis.nabeestech.com/api/v1/download/aio";
+// Rebix stays as the last resort for direct video links; YouTube now
+// bot-gates extraction from datacenter hosts, so it often answers
+// "no video qualities available". The Piped instances below do the
+// extraction on their own community hosts and are tried first.
 const YT_VIDEO_API = "https://api-rebix.vercel.app/api/ytv";
-const YT_SEARCH_API = "https://eliteprotech-apis.zone.id/search/ytsearch";
-const YT_AUDIO_API = "https://eliteprotech-apis.zone.id/download/ytmp3";
-const YT_PLAY_API = "https://api.ikyyxd.my.id/search/ytplayv2";
+// Piped: the open-source YouTube proxy network, keyless. Individual
+// instances come and go — the list is ordered by today's health and the
+// rotation below simply falls through to the next one when one 5xx's.
+const PIPED_APIS = [
+  "https://api.piped.private.coffee",
+  "https://pipedapi.reallyaweso.me",
+  "https://pipedapi.kavin.rocks"
+];
 
 export const PLATFORM_HOSTS = Object.freeze({
   facebook: ["facebook.com", "fb.com", "fb.watch"],
@@ -114,7 +123,85 @@ export async function resolveAllInOne(sourceUrl) {
   };
 }
 
+// Pulls the video id out of any YouTube link shape (watch, youtu.be, shorts,
+// embed, live). Pure so the suite can pin the behaviour.
+export function youtubeVideoId(value) {
+  const raw = String(value || "").trim();
+  const patterns = [
+    /[?&]v=([A-Za-z0-9_-]{6,})/,
+    /youtu\.be\/([A-Za-z0-9_-]{6,})/,
+    /\/shorts\/([A-Za-z0-9_-]{6,})/,
+    /\/embed\/([A-Za-z0-9_-]{6,})/,
+    /\/live\/([A-Za-z0-9_-]{6,})/
+  ];
+  for (const pattern of patterns) {
+    const match = raw.match(pattern);
+    if (match) return match[1];
+  }
+  return "";
+}
+
+// Pure: picks WhatsApp's friendliest audio stream — m4a/aac only (webm/opus
+// playback is unreliable in WhatsApp), highest bitrate wins. Tested.
+export function pickBestAudio(streams) {
+  const audio = (Array.isArray(streams) ? streams : [])
+    .filter(stream => /audio\/mp4|audio\/aac/i.test(String(stream?.mimeType || "")))
+    .sort((a, b) => (b?.bitrate || 0) - (a?.bitrate || 0));
+  return safeMediaUrl(audio[0]?.url, "audio") || null;
+}
+
+// Pure: picks WhatsApp's friendliest combined video stream — mp4 with its own
+// audio track, highest bitrate wins. Tested.
+export function pickBestVideo(streams) {
+  const videos = (Array.isArray(streams) ? streams : [])
+    .filter(stream => /video\/mp4/i.test(String(stream?.mimeType || "")) && !stream?.videoOnly)
+    .sort((a, b) => (b?.bitrate || 0) - (a?.bitrate || 0));
+  return safeMediaUrl(videos[0]?.url, "video") || null;
+}
+
+async function pipedRequest(path, { timeoutMs = 15000, label = "Piped" } = {}) {
+  let lastError = null;
+  for (const api of PIPED_APIS) {
+    try {
+      return await fetchJson(api + path, { timeoutMs, label });
+    } catch (error) {
+      lastError = error; // instance down or YouTube-gated — try the next one
+    }
+  }
+  throw lastError || new Error("the " + label + " services are all unreachable right now");
+}
+
+async function pipedSearchVideos(query) {
+  const payload = await pipedRequest(
+    "/search?q=" + encodeURIComponent(String(query || "").slice(0, 200)) + "&filter=music_songs",
+    { timeoutMs: 15000, label: "YouTube search" }
+  );
+  return (Array.isArray(payload?.items) ? payload.items : [])
+    .filter(item => item?.type === "stream" && (item?.url || item?.id))
+    .slice(0, 5)
+    .map(item => ({
+      id: String(item.id || String(item.url || "").match(/[?&]v=([A-Za-z0-9_-]{6,})/)?.[1] || ""),
+      title: cleanTitle(item.title || "Untitled", "song"),
+      author: cleanTitle(item.uploaderName || "Unknown creator", "Unknown creator").slice(0, 60),
+      duration: String(item.duration || "").slice(0, 20)
+    }))
+    .filter(item => item.id);
+}
+
 export async function resolveYouTubeVideo(videoUrl) {
+  const id = youtubeVideoId(videoUrl);
+  if (id) {
+    for (const api of PIPED_APIS) {
+      try {
+        const streams = await fetchJson(api + "/streams/" + id, { timeoutMs: 20000, label: "YouTube service" });
+        const url = pickBestVideo(streams?.videoStreams);
+        if (url) {
+          return { url, title: cleanTitle(streams?.title || "YouTube video"), item: { type: "video/mp4", extension: "mp4" } };
+        }
+      } catch { /* next instance */ }
+    }
+  }
+  // Rebix fallback for link downloads — alive, just YouTube-gated some days.
   const payload = await fetchJson(YT_VIDEO_API + "?url=" + encodeURIComponent(videoUrl), {
     timeoutMs: 90000,
     label: "YouTube service"
@@ -126,70 +213,31 @@ export async function resolveYouTubeVideo(videoUrl) {
 }
 
 export async function searchYouTube(query) {
-  const payload = await fetchJson(YT_SEARCH_API + "?q=" + encodeURIComponent(String(query || "").slice(0, 200)), {
-    timeoutMs: 45000,
-    label: "YouTube search"
-  });
-  const videos = Array.isArray(payload?.results?.videos) ? payload.results.videos
-    : Array.isArray(payload?.videos) ? payload.videos
-    : [];
+  const videos = await pipedSearchVideos(query);
   if (!videos.length) throw new Error("Nothing turned up for that search.");
-  return videos.slice(0, 5).map(video => ({
-    title: cleanTitle(video?.title || "Untitled"),
-    author: cleanTitle(video?.author?.name || video?.author || "Unknown creator", "Unknown creator").slice(0, 60),
-    duration: String(video?.duration || "").slice(0, 20),
-    url: safeMediaUrl(video?.url, "video")
-  })).filter(item => item.url);
+  return videos.map(video => ({
+    title: video.title,
+    author: video.author,
+    duration: video.duration,
+    url: "https://www.youtube.com/watch?v=" + video.id
+  }));
 }
 
+// YouTube audio for .song — Piped search finds the official track, the
+// streams call hands back direct googlevideo URLs that WhatsApp's fetchers
+// can pull even when our own host is IP-gated. A few candidates are tried:
+// the top hit's streams call sometimes comes back bot-gated.
 export async function searchYouTubeAudio(query) {
-  const term = encodeURIComponent(String(query || "").slice(0, 200));
-  // Primary route, verified working from datacenter hosts (the old yt-play
-  // services all died there): a keyless YouTube search finds the official
-  // video, a keyless converter turns it into a direct MP3 link.
-  try {
-    const found = await fetchJson(YT_SEARCH_API + "?q=" + term, {
-      timeoutMs: 45000,
-      label: "YouTube search"
-    });
-    const videos = found?.results?.videos || found?.results || found?.videos || [];
-    const top = (Array.isArray(videos) ? videos : [])
-      .find(video => safeMediaUrl(video?.url, "video") || video?.id);
-    const videoUrl = top
-      ? (safeMediaUrl(top.url, "video") || (top.id ? "https://www.youtube.com/watch?v=" + top.id : ""))
-      : "";
-    if (videoUrl) {
-      const converted = await fetchJson(YT_AUDIO_API + "?url=" + encodeURIComponent(videoUrl), {
-        timeoutMs: 120000,
-        label: "music service"
-      });
-      const audioUrl = safeMediaUrl(
-        converted?.download?.downloadUrl || converted?.downloadUrl ||
-        converted?.download?.url || converted?.url,
-        "audio"
-      );
-      if (audioUrl) {
-        return {
-          url: audioUrl,
-          title: cleanTitle(converted?.download?.title || top.title || query, "song")
-        };
-      }
-    }
-  } catch {
-    /* fall through to the legacy route */
+  const videos = await pipedSearchVideos(query);
+  if (!videos.length) throw new Error("Nothing turned up for that search.");
+  for (const video of videos.slice(0, 3)) {
+    try {
+      const streams = await pipedRequest("/streams/" + video.id, { timeoutMs: 20000, label: "music service" });
+      const url = pickBestAudio(streams?.audioStreams);
+      if (url) return { url, title: video.title };
+    } catch { /* next candidate */ }
   }
-  // Legacy route — dead at the moment, kept for when it wakes back up.
-  const payload = await fetchJson(YT_PLAY_API + "?q=" + term, {
-    timeoutMs: 60000,
-    label: "music service"
-  });
-  const result = payload?.result || payload?.data?.result || payload?.data || {};
-  const url = safeMediaUrl(result?.audio?.url || result?.audioUrl || result?.url, "audio");
-  if (!url) throw new Error("I could not get the audio for that. Try another song name.");
-  return {
-    url,
-    title: cleanTitle(result?.title || result?.name || query, "song")
-  };
+  throw new Error("I could not get the audio for that. Try another song name.");
 }
 
 const NABEES_API = "https://apis.nabeestech.com/api/v1";

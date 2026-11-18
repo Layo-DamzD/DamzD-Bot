@@ -8,11 +8,46 @@ function pickReply(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
-async function downloadNode(node, kind) {
+const MEDIA_PATHS = {
+  image: "/mms/image",
+  video: "/mms/video",
+  audio: "/mms/audio",
+  sticker: "/mms/image",
+  document: "/mms/document"
+};
+
+function synthesizedDirectPath(node, kind) {
+  // WhatsApp strips url and directPath from quoted copies of view-once media,
+  // but the encrypted-file hash and the mediaKey survive the strip — and the
+  // CDN path is just /mms/<type>/<hash>, the exact shape Baileys' own uploader
+  // builds. With the mediaKey that is enough to fetch and decrypt the
+  // original, even when the bot never saw the view-once itself.
+  const hash = node?.fileEncSha256;
+  if (!hash || !node?.mediaKey) return null;
+  const path = MEDIA_PATHS[kind];
+  if (!path) return null;
+  const b64 = Buffer.isBuffer(hash) || hash instanceof Uint8Array
+    ? Buffer.from(hash).toString("base64")
+    : String(hash);
+  const encoded = encodeURIComponent(b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""));
+  return path + "/" + encoded;
+}
+
+async function downloadVia(node, kind) {
   const stream = await downloadContentFromMessage(node, kind === "sticker" ? "sticker" : kind);
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   return Buffer.concat(chunks);
+}
+
+async function downloadNode(node, kind) {
+  try {
+    return await downloadVia(node, kind);
+  } catch (error) {
+    const directPath = synthesizedDirectPath(node, kind);
+    if (!directPath) throw error;
+    return await downloadVia({ ...node, directPath, url: undefined }, kind);
+  }
 }
 
 async function quotedMedia(ctx, { allowDocument = true } = {}) {

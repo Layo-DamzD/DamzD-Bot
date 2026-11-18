@@ -72,14 +72,30 @@ export function findCachedViewOnce(chatJid, stanzaId) {
   const id = String(stanzaId || "");
   if (!id) return null;
   const chat = normalizeJid(String(chatJid || ""));
-  if (!chat) return null;
-  const entry = stash.get(chat + "|" + id);
-  if (!entry) return null;
-  if (Date.now() - entry.at > TTL_MS) {
-    stash.delete(chat + "|" + id);
-    return null;
+  if (chat) {
+    const entry = stash.get(chat + "|" + id);
+    if (entry) {
+      if (Date.now() - entry.at > TTL_MS) {
+        stash.delete(chat + "|" + id);
+        return null;
+      }
+      return { node: entry.node, kind: entry.kind, sender: entry.sender };
+    }
   }
-  return { node: entry.node, kind: entry.kind, sender: entry.sender };
+  // Fallback: WhatsApp can deliver the same chat under two jid forms (the
+  // phone-number form and the LID form), so the original view-once and the
+  // quote may not agree on the chat key. Stanza ids are unique within the
+  // cache window, so matching on the id alone is safe there.
+  for (const [key, entry] of stash) {
+    if (key.endsWith("|" + id)) {
+      if (Date.now() - entry.at > TTL_MS) {
+        stash.delete(key);
+        continue;
+      }
+      return { node: entry.node, kind: entry.kind, sender: entry.sender };
+    }
+  }
+  return null;
 }
 
 export function viewOnceCacheSize() {

@@ -139,12 +139,14 @@ function buildSong(item, info, encrypted, query) {
 // for the best match. artistVerified means the official artist (identified
 // through Apple's catalogue) really appears on the track — a cover never
 // passes, so callers can prefer a real copy elsewhere when it is false.
-export async function searchSong(query) {
+export async function searchSong(query, hint = null) {
   const raw = String(query || "").trim();
   const cleaned = cleanSearchQuery(raw);
   if (!cleaned) throw new Error("tell me the song or artist name");
 
-  const identified = await identifyTrack(raw);
+  // Callers that already identified the track (.song does, to share one
+  // Apple call across every stage) pass the result in as a hint.
+  const identified = hint || await identifyTrack(raw);
   const attempts = [];
   if (identified?.artist && identified?.track) {
     attempts.push({ term: (identified.artist + " " + identified.track).slice(0, 140), expected: identified.artist });

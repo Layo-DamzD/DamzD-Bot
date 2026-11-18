@@ -423,6 +423,37 @@ await check(".song asks for a query when none is given", async () => {
   assert.match(firstText(), /tell me the song or artist name/);
 });
 
+await check("the music pipeline pins its picks: best m4a, honest artists, video ids", async () => {
+  const { pickBestAudio, pickBestVideo, youtubeVideoId } = await import("../src/downloads.js");
+  const streams = [
+    { mimeType: "video/mp4", bitrate: 900000, url: "https://x/video" },
+    { mimeType: "audio/webm", bitrate: 160000, url: "https://x/webm" },
+    { mimeType: "audio/mp4", bitrate: 129000, url: "https://x/a129" },
+    { mimeType: "audio/mp4", bitrate: 256000, url: "https://x/a256" }
+  ];
+  assert.equal(pickBestAudio(streams), "https://x/a256", "the highest-bitrate m4a wins");
+  assert.equal(pickBestAudio([]), null);
+  assert.equal(pickBestVideo(streams), "https://x/video");
+  const mixed = [
+    { mimeType: "video/mp4", bitrate: 700000, videoOnly: true, url: "https://x/vid-only" },
+    { mimeType: "video/mp4", bitrate: 400000, videoOnly: false, url: "https://x/combined" }
+  ];
+  assert.equal(pickBestVideo(mixed), "https://x/combined", "video-only streams never ship as a playable clip");
+  assert.equal(youtubeVideoId("https://www.youtube.com/watch?v=aBcD_ef&t=1"), "aBcD_ef");
+  assert.equal(youtubeVideoId("https://youtu.be/aBcD_ef"), "aBcD_ef");
+  assert.equal(youtubeVideoId("https://www.youtube.com/shorts/aBcD_ef"), "aBcD_ef");
+  assert.equal(youtubeVideoId("https://example.com/not-youtube"), "");
+  const { pickAudiusTrack } = await import("../src/audius.js");
+  const tracks = [
+    { id: "R1", title: "Faouzia - Unethical (Remix)", duration: 396, user: { name: "CryJaxx" } },
+    { id: "T1", title: "UNETHICAL", duration: 30, user: { name: "Faouzia" } },
+    { id: "T2", title: "UNETHICAL", duration: 197, user: { name: "Faouzia" } }
+  ];
+  const hit = pickAudiusTrack(tracks, "Faouzia");
+  assert.equal(hit?.id, "T2", "another artist's remix and a teaser never pass as the real song");
+  assert.equal(pickAudiusTrack(tracks, ""), null);
+});
+
 await check("view-once stanzas are cached so anyone can recover what the bot could see", async () => {
   const { stashViewOnce, findCachedViewOnce, viewOnceCacheSize } = await import("../src/viewonce.js");
   // A member sends the bot a view-once photo in their DM — the raw stanza

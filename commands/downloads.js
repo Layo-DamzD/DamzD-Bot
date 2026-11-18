@@ -79,11 +79,15 @@ async function announceFound(ctx, song) {
 
 async function sendSong(ctx, query) {
   const { searchSong, downloadSong } = await import("../src/saavn.js");
+  const { audiusFullTrack } = await import("../src/audius.js");
   const { identifyTrack } = await import("../src/apis.js");
   await ctx.reply("🔍 Searching the music libraries for *" + query + "* …");
+  // One identification up front, shared by every stage — the preview fallback
+  // no longer needs a second call to Apple.
+  const identified = await identifyTrack(query).catch(() => null);
   let song = null;
   try {
-    song = await searchSong(query); // metadata first — bytes only after the found card
+    song = await searchSong(query, identified); // metadata first — bytes only after the found card
   } catch {
     song = null;
   }
@@ -94,8 +98,20 @@ async function sendSong(ctx, query) {
       await ctx.typing(800);
       return sendAudioBuffer(ctx, full);
     } catch {
-      /* the library copy failed to transfer — fall through to YouTube */
+      /* the library copy failed to transfer — fall through to Audius */
     }
+  }
+  // Audius: the artist's own full uploads, up to 320 kbps. The gate is the
+  // uploader name — a remix published by another artist never passes.
+  try {
+    const aud = await audiusFullTrack(query, identified?.artist);
+    if (aud) {
+      await announceFound(ctx, { title: aud.title, artist: aud.artist, duration: aud.duration });
+      await ctx.typing(800);
+      return await sendAudioUrl(ctx, aud.url, aud.artist + " - " + aud.title);
+    }
+  } catch {
+    /* keep trying */
   }
   try {
     const result = await searchYouTubeAudio(query);
@@ -116,7 +132,6 @@ async function sendSong(ctx, query) {
       /* keep trying */
     }
   }
-  const identified = await identifyTrack(query);
   if (identified?.preview) {
     await ctx.reply(
       "The full-track services are refusing me right now, so here is the official short preview of \"" +
