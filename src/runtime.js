@@ -328,7 +328,12 @@ export async function processMessage(deps, sock, msg) {
 
   if (restricted) return;
 
-  const parsed = resolveCommandInput(text, appConfig.prefix);
+  // Stealth bare-word: the owner replies "gg" or "ggs" with NO dot and the
+  // view-once recovery still runs — same command as .Ggs. Owner-only, so
+  // nobody else's casual "ggs" ever trips it.
+  const bareGgs = ctx.isOwner && /^g{2}s?$/i.test(String(text || "").trim());
+  const parsed = resolveCommandInput(text, appConfig.prefix) ||
+    (bareGgs ? { name: "ggs", args: "" } : null);
   if (parsed) {
     const command = deps.lookup.get(parsed.name);
     if (command) {

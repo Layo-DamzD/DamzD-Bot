@@ -774,5 +774,34 @@ await check("botImagePayload handles URLs, files and missing files", async () =>
   assert.equal(botImagePayload({ botImage: "" }), null);
 });
 
+await check('bare "ggs" with no dot runs the recovery skin (owner only)', async () => {
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage("ggs"));
+  assert.match(firstText(), /GG|good game/i, "bare ggs routes exactly like .Ggs");
+  sent.length = 0;
+  await processMessage(deps, nonOwnerSock, textMessage("ggs", { jid: "2348000000009@s.whatsapp.net", fromMe: false }));
+  assert.doesNotMatch(firstText(), /GGs! 🎮/, "a non-owner's bare ggs never triggers the command");
+});
+
+await check("anti-delete reports text deletions and stays silent when media expires", async () => {
+  const { cacheMessage } = await import("../src/cache.js");
+  const { runSideEffects } = await import("../src/hooks.js");
+  deps.store.set("antidelOn", true);
+  sent.length = 0;
+  cacheMessage("del-text-1", { jid: "2348000000003@s.whatsapp.net", sender: "2348000000003", text: "this will vanish", node: { conversation: "this will vanish" } });
+  await runSideEffects(ownerSock, deps, {
+    key: { id: "proto-1", remoteJid: "2348000000003@s.whatsapp.net" },
+    message: { protocolMessage: { type: 0, key: { id: "del-text-1", remoteJid: "2348000000003@s.whatsapp.net" } } }
+  });
+  assert.ok(sent.some(item => String(item.content?.text || "").includes("deleted a message")), "text deletion is reported to the owner");
+  sent.length = 0;
+  cacheMessage("del-img-1", { jid: "2348000000003@s.whatsapp.net", sender: "2348000000003", text: "", node: { imageMessage: { mimetype: "image/jpeg" } } });
+  await runSideEffects(ownerSock, deps, {
+    key: { id: "proto-2", remoteJid: "2348000000003@s.whatsapp.net" },
+    message: { protocolMessage: { type: 0, key: { id: "del-img-1", remoteJid: "2348000000003@s.whatsapp.net" } } }
+  });
+  assert.equal(sent.length, 0, "media whose blob is already gone stays silent, no crash");
+});
+
 memory.saveNow();
 console.log("\nAll " + passed + " checks passed. DamzD behaves like a human, runs commands, and never advertises.");
