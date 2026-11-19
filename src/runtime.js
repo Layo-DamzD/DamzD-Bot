@@ -14,14 +14,15 @@ import QRCode from "qrcode";
 import { createContext } from "./context.js";
 import { resolveCommandInput } from "./loader.js";
 import { askAI, hasAIBrain } from "./ai.js";
+import { downloadContentFromMessage } from "baileys";
 import { detectPlatform, resolveAllInOne, mediaKind, cleanTitle } from "./downloads.js";
-import { messageText, mentionedJids, quotedParticipant, numberFromJid, sleep, botImagePayload } from "./utils.js";
+import { messageText, mentionedJids, quotedParticipant, numberFromJid, sleep, botImagePayload, unwrapMessage } from "./utils.js";
 import { config as appConfig, isOwnerNumber, addRuntimeOwner } from "./config.js";
 import { WELCOME_ON, GOODBYE_ON, ANTILINK_ON } from "./store.js";
 import { registerCallHook, runSideEffects, recordActivity } from "./hooks.js";
 import { HARD_PAUSED, PAUSE_NOTE } from "./flags.js";
 import { resolveJidNumber } from "./lidmap.js";
-import { stashViewOnce } from "./viewonce.js";
+import { stashViewOnce, findCachedViewOnce } from "./viewonce.js";
 import { connectNote } from "../commands/general.js";
 
 const MAX_PROCESSED_IDS = 2000;
@@ -270,6 +271,62 @@ async function handleLink(ctx, text) {
   }
 }
 
+// Reaction-save: any reaction to a remembered view-once pulls that media
+// straight back into the same chat — no reply needed, the reaction IS the
+// trigger. Access follows the command gate: self mode answers the owner
+// only, public mode lets anyone pull it. The stash fills on arrival
+// server-side (stashViewOnce runs before every gate), so the media is
+// remembered whether the owner is online or not, and the anti-delete
+// snapshot keeps running on its own on top of this.
+async function handleReactionSave(deps, sock, msg) {
+  let owner = false;
+  try {
+    const reaction = unwrapMessage(msg.message)?.reactionMessage;
+    const target = reaction?.key;
+    // An empty reaction text is a removal — never a trigger.
+    if (!target?.id || !String(reaction.text || "").trim()) return false;
+    const chat = String(msg.key.remoteJid || "");
+    const cached = findCachedViewOnce(target.remoteJid || chat, target.id);
+    if (!cached) return false;
+
+    const senderJid = String(msg.key.participant || chat);
+    const senderNumber = numberFromJid(senderJid);
+    owner = Boolean(msg.key.fromMe) || isOwnerNumber(senderNumber);
+    const banned = deps.store.get("banned", []).map(entry => String(entry).replace(/\D/g, ""));
+    if (!owner && (appConfig.accessMode !== "public" || banned.includes(senderNumber))) return false;
+
+    const kind = cached.kind;
+    if (!["image", "video", "audio", "sticker"].includes(kind)) return false;
+    const node = cached.node;
+    const stream = await downloadContentFromMessage(node, kind === "sticker" ? "sticker" : kind);
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    const buffer = Buffer.concat(chunks);
+    if (!buffer.length) throw new Error("empty media");
+
+    if (kind === "image") {
+      await sock.sendMessage(chat, { image: buffer, caption: node.caption || undefined });
+    } else if (kind === "video") {
+      await sock.sendMessage(chat, { video: buffer, mimetype: node.mimetype || "video/mp4", caption: node.caption || undefined });
+    } else if (kind === "audio") {
+      await sock.sendMessage(chat, { audio: buffer, mimetype: node.mimetype || "audio/mpeg", ptt: node.ptt === true });
+    } else {
+      await sock.sendMessage(chat, { sticker: buffer });
+    }
+    return true;
+  } catch {
+    // A failed pull never speaks in the chat — silence keeps the skin.
+    // Only the owner's own reaction earns a quiet note in their own chat.
+    try {
+      const ownerJid = String(appConfig.ownerNumbers[0] || "").replace(/\D/g, "");
+      if (owner && ownerJid) {
+        await sock.sendMessage(ownerJid + "@s.whatsapp.net", { text: "That view-once could not be pulled back — it may have expired." });
+      }
+    } catch { /* never break message processing */ }
+    return true; // consumed: a known target that failed must not fall through
+  }
+}
+
 export async function processMessage(deps, sock, msg) {
   if (!msg?.message || !msg?.key?.remoteJid) return;
   const jid = String(msg.key.remoteJid);
@@ -288,6 +345,10 @@ export async function processMessage(deps, sock, msg) {
       deps.processed.delete(oldest);
     }
   }
+
+  // Reaction-save first: reactions carry no text, so they would otherwise
+  // die silently at the text gate below.
+  if (await handleReactionSave(deps, sock, msg)) return;
 
   const text = messageText(msg.message);
   if (!text) return;

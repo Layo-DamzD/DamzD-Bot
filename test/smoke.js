@@ -759,7 +759,7 @@ await check("connectNote greets the owner in the menu's look", async () => {
   const { connectNote } = await import("../commands/general.js");
   const note = connectNote({ name: "DamzD", prefix: "." });
   assert.match(note, /connected and online/);
-  assert.match(note, /1\.4\.25/);
+  assert.match(note, /1\.4\.26/);
   assert.match(note, /PREFIX|𝗣𝗥𝗘𝗙𝗜𝗫/);
   assert.match(note, /menu/);
 });
@@ -839,6 +839,55 @@ await check(".prefix moves the command mark and the store remembers it", async (
   await prefixCommand.run({ isOwner: true, args: "nope", store: fakeStore, reply: t => replies.push(t) });
   assert.match(replies.at(-1), /1-3 symbols/, "letters are refused — symbols only");
   assert.equal(appConfig.prefix, ".", "a refused mark leaves the dot untouched");
+});
+
+await check("reaction-save: reacting to a view-once pulls it back — access-gated", async () => {
+  const chat = "2348000000009@s.whatsapp.net";
+  const viewOnce = {
+    key: { remoteJid: chat, fromMe: false, id: "VV-REACT-1" },
+    message: { viewOnceMessageV2: { message: { imageMessage: {
+      url: "https://mmg.whatsapp.net/v/t62.7118-24/missing.jpg",
+      directPath: "/mms/image/missing",
+      mimetype: "image/jpeg",
+      caption: "look quick",
+      fileEncSha256: "AAAA",
+      mediaKey: "BBBB"
+    } } } }
+  };
+  sent.length = 0;
+  await processMessage(deps, nonOwnerSock, viewOnce);
+  assert.equal(sent.length, 0, "the view-once arrives silently (stash only)");
+
+  const react = (targetId, fromMe) => ({
+    key: { remoteJid: chat, fromMe: Boolean(fromMe), id: "REACT-" + Math.random().toString(36).slice(2) },
+    message: { reactionMessage: { key: { remoteJid: chat, id: targetId, fromMe: false }, text: "👀" } }
+  });
+
+  setAccessMode("self");
+  sent.length = 0;
+  await processMessage(deps, nonOwnerSock, react("VV-REACT-1"));
+  assert.equal(sent.length, 0, "self mode: only the owner's reaction can pull");
+
+  setAccessMode("public");
+  sent.length = 0;
+  await processMessage(deps, nonOwnerSock, react("VV-REACT-1"));
+  assert.equal(sent.length, 0, "public mode: the pull runs but a failed fetch stays silent in the chat");
+
+  sent.length = 0;
+  await processMessage(deps, ownerSock, react("VV-REACT-1", true));
+  assert.match(firstText(), /could not be pulled back/, "the owner's reaction earns a quiet note in his own chat");
+  assert.equal(sent[0].jid, "2348000000001@s.whatsapp.net", "the note goes to the owner's own chat only");
+
+  sent.length = 0;
+  const removal = react("VV-REACT-1", true);
+  removal.message.reactionMessage.text = "";
+  await processMessage(deps, ownerSock, removal);
+  assert.equal(sent.length, 0, "removing a reaction is never a trigger");
+
+  sent.length = 0;
+  await processMessage(deps, nonOwnerSock, react("NOT-IN-STORE"));
+  assert.equal(sent.length, 0, "reacting to a normal message does nothing");
+  setAccessMode("self");
 });
 
 memory.saveNow();
