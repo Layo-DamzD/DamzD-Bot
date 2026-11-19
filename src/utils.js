@@ -1,3 +1,27 @@
+import fs from "node:fs";
+import path from "node:path";
+
+// The bot's picture (assets/bot-image.png by default, or a BOT_IMAGE URL) —
+// sent first on .menu, .help and the connect note. A URL passes straight
+// through; a local file is read once and cached. Null when nothing usable is
+// set, so callers simply skip the picture.
+let botImageBuffer;
+let botImageCachedFor = "";
+export function botImagePayload(config) {
+  const source = String(config?.botImage || "").trim();
+  if (!source) return null;
+  if (/^https?:\/\//i.test(source)) return { image: { url: source } };
+  try {
+    if (botImageCachedFor !== source) {
+      botImageBuffer = fs.readFileSync(path.resolve(source));
+      botImageCachedFor = source;
+    }
+    return { image: botImageBuffer };
+  } catch {
+    return null;
+  }
+}
+
 const WRAPPER_KEYS = [
   "ephemeralMessage",
   "viewOnceMessage",

@@ -66,6 +66,12 @@ export function createContext({ sock, msg, config, store, memory, sessions = nul
       return last;
     },
 
+    // One message, never split — for the megamenus the owner wants as a
+    // single block (.menu, .help). WhatsApp accepts texts up to ~65k.
+    async replyOnce(text, extra = {}) {
+      return sock.sendMessage(jid, { text: String(text), ...extra });
+    },
+
     async send(content) {
       return sock.sendMessage(jid, content);
     },

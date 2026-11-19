@@ -59,6 +59,9 @@ export const config = Object.freeze({
   prefix: String(process.env.PREFIX || ".").slice(0, 3) || ".",
   sessionDirectory: String(process.env.SESSION_DIR || "./auth").trim() || "./auth",
   dataDirectory: String(process.env.DATA_DIR || "./data").trim() || "./data",
+  // The bot's picture — shown first on .menu, .help and the connect note.
+  // A local file path (assets/bot-image.png) or an https URL (BOT_IMAGE env).
+  botImage: String(process.env.BOT_IMAGE || "assets/bot-image.png").trim() || "assets/bot-image.png",
   logLevel: String(process.env.LOG_LEVEL || "warn").trim().toLowerCase() || "warn",
   port: Number(process.env.PORT || 3000) || 3000,
   autoDownloadLinks: String(process.env.AUTO_DL || "true").trim().toLowerCase() !== "false",

@@ -15,13 +15,14 @@ import { createContext } from "./context.js";
 import { resolveCommandInput } from "./loader.js";
 import { askAI, hasAIBrain } from "./ai.js";
 import { detectPlatform, resolveAllInOne, mediaKind, cleanTitle } from "./downloads.js";
-import { messageText, mentionedJids, quotedParticipant, numberFromJid, sleep } from "./utils.js";
+import { messageText, mentionedJids, quotedParticipant, numberFromJid, sleep, botImagePayload } from "./utils.js";
 import { config as appConfig, isOwnerNumber, addRuntimeOwner } from "./config.js";
 import { WELCOME_ON, GOODBYE_ON, ANTILINK_ON } from "./store.js";
 import { registerCallHook, runSideEffects, recordActivity } from "./hooks.js";
 import { HARD_PAUSED, PAUSE_NOTE } from "./flags.js";
 import { resolveJidNumber } from "./lidmap.js";
 import { stashViewOnce } from "./viewonce.js";
+import { connectNote } from "../commands/general.js";
 
 const MAX_PROCESSED_IDS = 2000;
 const AI_COOLDOWN_MS = 2500;
@@ -584,14 +585,17 @@ export class DamzDBot {
         const ownNumber = numberFromJid(sock.user?.id || "");
         if (ownNumber) addRuntimeOwner(ownNumber);
         console.log("[" + appConfig.name + "] connected as " + (sock.user?.id || "unknown"));
-        if (this.pairingWasFresh && !this.introSent) {
+        // First stable connection of this run: the bot's picture goes first,
+        // then the connect note as ONE unbroken message, straight to the
+        // owner's own chat. Socket recycles keep the same session object, so
+        // reconnects never spam this — only a real start announces.
+        if (!this.introSent) {
           this.introSent = true;
-          const hello =
-            "✅ Linked successfully. I am " + appConfig.name + " — " + appConfig.ownerName +
-            "'s personal assistant. No ads, no footers, no promotions. Just me helping.\n\n" +
-            "Talk to me in your own words, or send " + appConfig.prefix + "menu to see everything I can do.";
           if (ownNumber) {
-            sock.sendMessage(ownNumber + "@s.whatsapp.net", { text: hello }).catch(() => {});
+            const ownJid = ownNumber + "@s.whatsapp.net";
+            const picture = botImagePayload(appConfig);
+            if (picture) sock.sendMessage(ownJid, picture).catch(() => {});
+            sock.sendMessage(ownJid, { text: connectNote(appConfig) }).catch(() => {});
           }
         }
       } else if (connection === "close") {

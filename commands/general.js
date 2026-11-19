@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { botImagePayload } from "../src/utils.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const APP_VERSION = (() => {
@@ -95,6 +96,37 @@ function buildCategoryOverview(commands, config) {
     "Send me a TikTok, YouTube, Instagram or Facebook link and I will fetch the media for you."
   );
   return lines.join("\n") + "\n\n" + MENU_ENDING;
+}
+
+// The bot's picture goes out FIRST on .menu and .help — the menu text follows
+// it as one unbroken message. A missing or broken picture never blocks the
+// text: the picture is simply skipped.
+async function sendBotImage(ctx) {
+  const payload = botImagePayload(ctx.config);
+  if (!payload) return;
+  try {
+    await ctx.send(payload);
+  } catch {
+    /* the picture is decorative — the text still goes out */
+  }
+}
+
+// The connect note sent to the owner's own chat when the bot comes online —
+// the menu's look, one message.
+export function connectNote(config) {
+  return [
+    BOX_TOP + "⚡ " + config.name + " 〕",
+    BOX_LINE + "◇ " + mbold("STATUS") + ": connected and online ✅",
+    BOX_LINE + "◇ " + mbold("VERSION") + ": " + APP_VERSION,
+    BOX_LINE + "◇ " + mbold("PREFIX") + ": " + config.prefix,
+    BOX_LINE + "◇ " + mbold("MY TIME") + ": " + lagosTime() + " (WAT)",
+    "│",
+    BOX_BOTTOM,
+    "",
+    "I am online and linked to this account. Talk to me in normal words, or send " + config.prefix + "menu to see everything I can do.",
+    "",
+    MENU_ENDING
+  ].join("\n");
 }
 
 function buildFullList(commands, config) {
@@ -209,7 +241,8 @@ export default [
         );
         return;
       }
-      await ctx.reply(section || buildCategoryOverview(ctx.commands, ctx.config));
+      if (!wanted) await sendBotImage(ctx);
+      await ctx.replyOnce(section || buildCategoryOverview(ctx.commands, ctx.config));
     }
   },
   {
@@ -220,7 +253,8 @@ export default [
     run: async ctx => {
       const wanted = String(ctx.args || "").trim();
       if (!wanted) {
-        await ctx.reply(buildFullList(ctx.commands, ctx.config));
+        await sendBotImage(ctx);
+        await ctx.replyOnce(buildFullList(ctx.commands, ctx.config));
         return;
       }
       const detail = buildCommandDetail(ctx.commands, ctx.config, wanted);

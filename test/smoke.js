@@ -731,5 +731,48 @@ await check("no reply text ever contains promotional content", async () => {
   }
 });
 
+await check(".menu sends the bot picture first, then the menu as ONE message", async () => {
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".menu"));
+  const sends = sent.filter(item => !item.content.react); // the ⚡ ack is a reaction, not a message
+  assert.equal(sends.length, 2, "exactly two sends: the picture, then one text");
+  assert.ok(Buffer.isBuffer(sends[0].content.image), "the picture goes first");
+  assert.ok(!sends[0].content.text, "the picture carries no caption");
+  const menu = sends[1].content.text;
+  assert.match(menu, /DamzD/);
+  assert.match(menu, /SECTIONS|𝗦𝗘𝗖𝗧𝗜𝗢𝗡𝗦/);
+  assert.match(menu, /GREAT DAMZD|𝗚𝗥𝗘𝗔𝗧 𝗗𝗔𝗠𝗭𝗗/);
+});
+
+await check(".help sends the picture first and the full list as ONE unbroken text", async () => {
+  sent.length = 0;
+  await processMessage(deps, ownerSock, textMessage(".help"));
+  const sends = sent.filter(item => !item.content.react); // the ⚡ ack is a reaction, not a message
+  assert.equal(sends.length, 2, "exactly two sends: the picture, then one text");
+  assert.ok(Buffer.isBuffer(sends[0].content.image), "the picture goes first");
+  const help = sends[1].content.text;
+  assert.match(help, /ping/i);
+  assert.match(help, /menu/i);
+});
+
+await check("connectNote greets the owner in the menu's look", async () => {
+  const { connectNote } = await import("../commands/general.js");
+  const note = connectNote({ name: "DamzD", prefix: "." });
+  assert.match(note, /connected and online/);
+  assert.match(note, /1\.4\.24/);
+  assert.match(note, /PREFIX|𝗣𝗥𝗘𝗙𝗜𝗫/);
+  assert.match(note, /menu/);
+});
+
+await check("botImagePayload handles URLs, files and missing files", async () => {
+  const { botImagePayload } = await import("../src/utils.js");
+  const asUrl = botImagePayload({ botImage: "https://example.com/pic.jpg" });
+  assert.deepEqual(asUrl, { image: { url: "https://example.com/pic.jpg" } });
+  const asFile = botImagePayload({ botImage: "assets/bot-image.png" });
+  assert.ok(Buffer.isBuffer(asFile.image), "local file becomes a Buffer");
+  assert.equal(botImagePayload({ botImage: "assets/does-not-exist.png" }), null);
+  assert.equal(botImagePayload({ botImage: "" }), null);
+});
+
 memory.saveNow();
 console.log("\nAll " + passed + " checks passed. DamzD behaves like a human, runs commands, and never advertises.");
