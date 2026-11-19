@@ -37,6 +37,21 @@ export function setAccessMode(mode) {
   return accessMode;
 }
 
+// The command mark ("." by default) lives in a plain mutable binding like
+// accessMode: the .prefix owner command moves it at runtime and the store
+// remembers it for the next boot. The bare words (song, play, video, ggs,
+// save, menu, help, ping) never change — commands stay reachable without any
+// mark whatever this becomes.
+let prefixMark = String(process.env.PREFIX || ".").slice(0, 3) || ".";
+
+export function setPrefix(mark) {
+  const value = String(mark || "").trim().slice(0, 3);
+  if (!value) return prefixMark;
+  prefixMark = value;
+  process.env.PREFIX = value;
+  return prefixMark;
+}
+
 // DAMZD_CHILD=1 marks a friend's connected session (spawned by the session
 // manager). The AI split: children run on Groq only, so five friend bots can
 // never burn the owner's quotas; the main bot's chat brain is Puter.
@@ -56,7 +71,7 @@ export const config = Object.freeze({
   ownerName: String(process.env.OWNER_NAME || "Boss").trim() || "Boss",
   ownerNumbers: Object.freeze(ownerNumbers),
   get accessMode() { return accessMode; },
-  prefix: String(process.env.PREFIX || ".").slice(0, 3) || ".",
+  get prefix() { return prefixMark; },
   sessionDirectory: String(process.env.SESSION_DIR || "./auth").trim() || "./auth",
   dataDirectory: String(process.env.DATA_DIR || "./data").trim() || "./data",
   // The bot's picture — shown first on .menu, .help and the connect note.

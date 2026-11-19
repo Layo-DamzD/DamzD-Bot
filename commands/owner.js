@@ -1,4 +1,4 @@
-import { config as appConfig, setAccessMode } from "../src/config.js";
+import { config as appConfig, setAccessMode, setPrefix } from "../src/config.js";
 
 export default [
   {
@@ -370,6 +370,30 @@ export default [
       } catch {
         throw new Error("WhatsApp did not share the privacy settings with me");
       }
+    }
+  },
+  {
+    name: "prefix",
+    category: "Owner",
+    description: "change my command mark — .prefix ! makes !menu work",
+    run: async ctx => {
+      if (!ctx.isOwner) throw new Error("this is an owner command");
+      const wanted = String(ctx.args || "").trim();
+      if (!wanted) {
+        await ctx.reply(
+          "My command mark is *" + appConfig.prefix + "*.\n" +
+          "Change it: " + appConfig.prefix + "prefix ! — 1-3 symbols, no spaces.\n" +
+          "The bare words never change: song, play, video, ggs (reply), save, menu, help, ping all work without any mark."
+        );
+        return;
+      }
+      if (!/^[^\s\w]{1,3}$/u.test(wanted)) {
+        await ctx.reply("Give me 1-3 symbols with no spaces — e.g. *" + appConfig.prefix + "prefix !* or *" + appConfig.prefix + "prefix ..*");
+        return;
+      }
+      const applied = setPrefix(wanted);
+      ctx.store.set("prefix", applied);
+      await ctx.reply("Done — commands now start with *" + applied + "* (e.g. " + applied + "menu). Bare words still work as always: song, play, video, ggs, save, menu, help, ping.");
     }
   }
 ];

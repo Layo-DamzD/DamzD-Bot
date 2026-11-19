@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 
-import { config } from "./src/config.js";
+import { config, setPrefix } from "./src/config.js";
 import { ChatMemory } from "./src/memory.js";
 import { JsonStore } from "./src/store.js";
 import { loadCommands, buildLookup } from "./src/loader.js";
@@ -35,6 +35,9 @@ async function main() {
   const lookup = buildLookup(commands);
   const memory = new ChatMemory(path.resolve(config.dataDirectory));
   const store = new JsonStore(path.resolve(config.dataDirectory), "settings.json");
+  // The owner's saved command mark (.prefix) wins over the env default.
+  const savedPrefix = store.get("prefix", "");
+  if (savedPrefix) setPrefix(savedPrefix);
 
   const bot = new DamzDBot({ commands, lookup, memory, store });
 

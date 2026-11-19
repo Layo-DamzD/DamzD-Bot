@@ -27,6 +27,24 @@ import { connectNote } from "../commands/general.js";
 const MAX_PROCESSED_IDS = 2000;
 const AI_COOLDOWN_MS = 2500;
 
+// Bare words — command words that read like requests work with NO dot at all.
+// In group chats only the media and recovery words listen (so "song darlene"
+// in a GC fetches the song and replying "ggs" to a view-once recovers it, for
+// everyone in public mode); in DMs the info words join them. The list maps
+// straight onto the command lookup, and .prefix never touches these — the dot
+// and the bare words are two doors to the same commands.
+const BARE_GROUP_WORDS = ["song", "play", "music", "video", "ytmp4", "ggs", "gg", "save"];
+const BARE_DM_WORDS = ["menu", "help", "ping", "sections"];
+export function resolveBareCommand(text, isGroup) {
+  const value = String(text || "").trim();
+  if (!value || value.startsWith(appConfig.prefix)) return null;
+  const parts = value.split(/\s+/);
+  const word = parts[0].toLowerCase();
+  const words = isGroup ? BARE_GROUP_WORDS : BARE_GROUP_WORDS.concat(BARE_DM_WORDS);
+  if (!words.includes(word)) return null;
+  return { name: word, args: parts.slice(1).join(" ") };
+}
+
 // ── Receptionist mode ────────────────────────────────────────────────────────
 // She used to hold full AI conversations with anyone who messaged — even with
 // the same person the owner was texting himself, because his own outgoing
@@ -328,12 +346,11 @@ export async function processMessage(deps, sock, msg) {
 
   if (restricted) return;
 
-  // Stealth bare-word: the owner replies "gg" or "ggs" with NO dot and the
-  // view-once recovery still runs — same command as .Ggs. Owner-only, so
-  // nobody else's casual "ggs" ever trips it.
-  const bareGgs = ctx.isOwner && /^g{2}s?$/i.test(String(text || "").trim());
+  // Bare words first (no dot), then the dotted form — either door runs the
+  // same command. The access gate above already decided who may speak to me,
+  // so in public mode friends get bare song/video/ggs/save too.
   const parsed = resolveCommandInput(text, appConfig.prefix) ||
-    (bareGgs ? { name: "ggs", args: "" } : null);
+    resolveBareCommand(text, ctx.isGroup);
   if (parsed) {
     const command = deps.lookup.get(parsed.name);
     if (command) {

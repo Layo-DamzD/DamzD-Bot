@@ -759,7 +759,7 @@ await check("connectNote greets the owner in the menu's look", async () => {
   const { connectNote } = await import("../commands/general.js");
   const note = connectNote({ name: "DamzD", prefix: "." });
   assert.match(note, /connected and online/);
-  assert.match(note, /1\.4\.24/);
+  assert.match(note, /1\.4\.25/);
   assert.match(note, /PREFIX|𝗣𝗥𝗘𝗙𝗜𝗫/);
   assert.match(note, /menu/);
 });
@@ -774,13 +774,18 @@ await check("botImagePayload handles URLs, files and missing files", async () =>
   assert.equal(botImagePayload({ botImage: "" }), null);
 });
 
-await check('bare "ggs" with no dot runs the recovery skin (owner only)', async () => {
+await check('bare "ggs" with no dot runs the recovery skin — owner AND friends', async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage("ggs"));
   assert.match(firstText(), /GG|good game/i, "bare ggs routes exactly like .Ggs");
+  setAccessMode("public");
   sent.length = 0;
   await processMessage(deps, nonOwnerSock, textMessage("ggs", { jid: "2348000000009@s.whatsapp.net", fromMe: false }));
-  assert.doesNotMatch(firstText(), /GGs! 🎮/, "a non-owner's bare ggs never triggers the command");
+  assert.match(firstText(), /GG|good game/i, "a friend's bare ggs works too in public mode");
+  setAccessMode("self");
+  sent.length = 0;
+  await processMessage(deps, nonOwnerSock, textMessage("ggs", { jid: "2348000000009@s.whatsapp.net", fromMe: false }));
+  assert.doesNotMatch(firstText(), /GGs! 🎮/, "in self mode only the owner's bare words count");
 });
 
 await check("anti-delete reports text deletions and stays silent when media expires", async () => {
@@ -801,6 +806,39 @@ await check("anti-delete reports text deletions and stays silent when media expi
     message: { protocolMessage: { type: 0, key: { id: "del-img-1", remoteJid: "2348000000003@s.whatsapp.net" } } }
   });
   assert.equal(sent.length, 0, "media whose blob is already gone stays silent, no crash");
+});
+
+await check("bare words: song in a GC with no dot; menu stays dot-only there", async () => {
+  const { resolveBareCommand } = await import("../src/runtime.js");
+  assert.deepEqual(resolveBareCommand("song darlene hello", true), { name: "song", args: "darlene hello" }, '"song <name>" in a GC fetches the song');
+  assert.deepEqual(resolveBareCommand("play cold water", true), { name: "play", args: "cold water" });
+  assert.deepEqual(resolveBareCommand("save", false), { name: "save", args: "" });
+  assert.deepEqual(resolveBareCommand("menu", false), { name: "menu", args: "" }, "DMs get the info words bare");
+  assert.equal(resolveBareCommand("menu", true), null, "in a GC menu still wants the dot");
+  assert.equal(resolveBareCommand("how far", true), null, "plain talk never parses as a command");
+  assert.equal(resolveBareCommand(".song x", true), null, "dotted text goes through the dot path");
+});
+
+await check(".prefix moves the command mark and the store remembers it", async () => {
+  const { config: appConfig } = await import("../src/config.js");
+  const fakeStore = { saved: null, set(key, value) { this.saved = [key, value]; } };
+  const replies = [];
+  const prefixCommand = lookup.get("prefix");
+  assert.ok(prefixCommand, "the prefix command is registered in the OWNER section");
+  await assert.rejects(
+    () => prefixCommand.run({ isOwner: false, args: "!", store: fakeStore, reply: t => replies.push(t) }),
+    /owner/,
+    "non-owners cannot move the mark"
+  );
+  await prefixCommand.run({ isOwner: true, args: "!", store: fakeStore, reply: t => replies.push(t) });
+  assert.equal(appConfig.prefix, "!", "the mark changed to !");
+  assert.deepEqual(fakeStore.saved, ["prefix", "!"], "the store keeps it for the next boot");
+  assert.match(replies.at(-1), /!\* \(e\.g\. !menu\)/);
+  await prefixCommand.run({ isOwner: true, args: ".", store: fakeStore, reply: t => replies.push(t) });
+  assert.equal(appConfig.prefix, ".", "back to the dot");
+  await prefixCommand.run({ isOwner: true, args: "nope", store: fakeStore, reply: t => replies.push(t) });
+  assert.match(replies.at(-1), /1-3 symbols/, "letters are refused — symbols only");
+  assert.equal(appConfig.prefix, ".", "a refused mark leaves the dot untouched");
 });
 
 memory.saveNow();
