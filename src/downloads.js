@@ -108,10 +108,11 @@ export function cleanTitle(value, fallback = "download") {
 }
 
 export async function resolveAllInOne(sourceUrl) {
-  // The provider introduced API keys — attach the owner's free key when it is
-  // configured so downloads keep working; without it most providers now fail.
-  const key = String(process.env.NABEES_API_KEY || "").trim();
-  const url = AIO_API + "?url=" + encodeURIComponent(sourceUrl) + (key ? "&apikey=" + encodeURIComponent(key) : "");
+  // The provider requires a key — the free public one works (~100/day), and a
+  // personal NABEES_API_KEY raises the quota. Keyless requests are refused
+  // outright, so never send one.
+  const key = String(process.env.NABEES_API_KEY || "nabeestech").trim() || "nabeestech";
+  const url = AIO_API + "?url=" + encodeURIComponent(sourceUrl) + "&apikey=" + encodeURIComponent(key);
   const payload = await fetchJson(url, { timeoutMs: 90000, label: "download provider" });
   const data = payload?.data?.data || payload?.data || payload?.result || payload || {};
   const selected = chooseMedia(data);
@@ -249,13 +250,12 @@ export async function searchYouTubeAudio(query) {
 
 const NABEES_API = "https://apis.nabeestech.com/api/v1";
 
-// NABEES free tier (key "nabeestech", ~100 requests/day) can search YouTube
-// and convert a video to MP3 — the rescue path for tracks the song library
-// only offers as covers. Kept behind NABEES_API_KEY so the daily quota is
-// never spent by accident.
+// NABEES free tier — the public key "nabeestech" (~100 requests/day) works
+// out of the box; a personal NABEES_API_KEY from apis.nabeestech.com raises
+// the quota. Either way the YouTube rescue path is ALWAYS on — a missing
+// dashboard key must never switch the whole service off again.
 export async function searchYouTubeNabees(query) {
-  const key = String(process.env.NABEES_API_KEY || "").trim();
-  if (!key) throw new Error("no-key");
+  const key = String(process.env.NABEES_API_KEY || "nabeestech").trim() || "nabeestech";
   const payload = await fetchJson(
     NABEES_API + "/search/youtube?apikey=" + encodeURIComponent(key) +
     "&q=" + encodeURIComponent(String(query || "").slice(0, 200)),
@@ -272,8 +272,7 @@ export async function searchYouTubeNabees(query) {
 }
 
 export async function resolveYouTubeAudioNabees(videoUrl) {
-  const key = String(process.env.NABEES_API_KEY || "").trim();
-  if (!key) throw new Error("no-key");
+  const key = String(process.env.NABEES_API_KEY || "nabeestech").trim() || "nabeestech";
   const query = "apikey=" + encodeURIComponent(key) + "&url=" + encodeURIComponent(videoUrl);
   const endpoints = ["/download/youtube-mp3", "/download/youtube", "/download/youtube-v2"];
   let lastError = new Error("the YouTube music service refused that request");

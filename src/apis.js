@@ -8,7 +8,9 @@ export async function fetchBuffer(url, { timeoutMs = 90000, label = "service", h
   let response;
   try {
     response = await fetch(url, {
-      headers: { ...(headers || {}) },
+      // Several download hosts refuse UA-less clients outright — always look
+      // like a browser unless the caller sent explicit headers.
+      headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36", ...(headers || {}) },
       signal: AbortSignal.timeout(timeoutMs)
     });
   } catch (error) {

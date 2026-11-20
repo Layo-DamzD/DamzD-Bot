@@ -130,18 +130,19 @@ async function sendSong(ctx, query) {
   } catch {
     /* keep trying */
   }
-  if (String(process.env.NABEES_API_KEY || "").trim()) {
-    try {
-      const found = await searchYouTubeNabees(query);
-      const audio = await resolveYouTubeAudioNabees(found.url);
-      const buffer = await fetchBuffer(audio.url, { timeoutMs: 60000, label: "rescue stream" });
-      if (buffer.length < 150 * 1024) throw new Error("the rescue stream came back broken");
-      await announceFound(ctx, { title: audio.title || found.title });
-      await ctx.typing(800);
-      return await ctx.send({ audio: buffer, mimetype: "audio/mpeg", fileName: cleanTitle(audio.title || found.title) + ".mp3", ptt: false });
-    } catch {
-      /* keep trying */
-    }
+  // The YouTube rescue path is ALWAYS on — the free NABEES key works, a
+  // personal NABEES_API_KEY only raises the quota. A missing key must never
+  // switch the service off again.
+  try {
+    const found = await searchYouTubeNabees(query);
+    const audio = await resolveYouTubeAudioNabees(found.url);
+    const buffer = await fetchBuffer(audio.url, { timeoutMs: 60000, label: "rescue stream" });
+    if (buffer.length < 150 * 1024) throw new Error("the rescue stream came back broken");
+    await announceFound(ctx, { title: audio.title || found.title });
+    await ctx.typing(800);
+    return await ctx.send({ audio: buffer, mimetype: "audio/mpeg", fileName: cleanTitle(audio.title || found.title) + ".mp3", ptt: false });
+  } catch {
+    /* keep trying */
   }
   if (identified?.preview) {
     // The preview is downloaded and checked BEFORE it is offered: a bare URL
@@ -165,7 +166,7 @@ async function sendSong(ctx, query) {
     }
   }
   throw new Error(
-    "I could not get a clean copy of that song — try the exact title, or add a free NABEES_API_KEY (apis.nabeestech.com) to my settings for the full YouTube catalogue"
+    "I could not get a clean copy of that song — try the exact title, and if it still refuses, every source is refusing that one right now"
   );
 }
 
@@ -256,7 +257,7 @@ export default [
           resolved = await resolveAllInOne(url);
         } else {
           throw new Error(
-            "my free YouTube route is being refused right now — add a free NABEES_API_KEY (apis.nabeestech.com) to my settings to restore video downloads"
+            "every YouTube route refused me on that link just now — try it again in a little while"
           );
         }
       }
