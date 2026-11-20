@@ -762,7 +762,7 @@ await check("connectNote greets the owner in the menu's look", async () => {
   const { connectNote } = await import("../commands/general.js");
   const note = connectNote({ name: "DamzD", prefix: "." });
   assert.match(note, /connected and online/);
-  assert.match(note, /1\.4\.27/);
+  assert.match(note, /1\.4\.28/);
   assert.match(note, /PREFIX|𝗣𝗥𝗘𝗙𝗜𝗫/);
   assert.match(note, /OWNER|𝗢𝗪𝗡𝗘𝗥/);
   assert.match(note, /MODE|𝗠𝗢𝗗𝗘/);
@@ -932,6 +932,54 @@ await check("reaction falls back to the anti-delete snapshot (view-once only)", 
   await processMessage(deps, ownerSock, reactTo("VV-SNAP-9"));
   assert.match(firstText(), /could not be pulled back/, "the snapshot fallback found the view-once (fetch then failed — owner note proves the path ran)");
   setAccessMode("self");
+});
+
+await check("searchQuality: an artist-only match for a multi-word query is weak", async () => {
+  const { searchQuality } = await import("../src/apis.js");
+  // the real failure: "altare btw" announced "Altare — Surge" as Found it
+  assert.equal(searchQuality("altare btw", { title: "Surge", artist: "Altare" }), "weak");
+  assert.equal(searchQuality("altare bye", { title: "bye (slowed)", artist: "Altare" }), "strong");
+  assert.equal(searchQuality("cold water", { title: "Cold Water", artist: "Major Lazer" }), "strong");
+  assert.equal(searchQuality("rema", { title: "Calm Down", artist: "Rema" }), "strong", "one-word artist searches keep working");
+  assert.equal(searchQuality("darlene", { title: "Hello", artist: "Omolara" }), "weak", "different words do not pass");
+});
+
+await check("the media snapshot survives restarts via messages.json", async () => {
+  const cache = await import("../src/cache.js");
+  const fsp = await import("node:fs");
+  const nodePath = await import("node:path");
+  const dir = nodePath.join(process.cwd(), "test", ".tmp-snapshot");
+  fsp.rmSync(dir, { recursive: true, force: true });
+  cache.initMessageStore(dir);
+  cache.cacheMessage("SNAP-PERSIST-1", { jid: "2348000000001@s.whatsapp.net", node: { imageMessage: { url: "https://x/y.jpg" } } });
+  cache.cacheMessage("SNAP-TEXT-1", { jid: "2348000000001@s.whatsapp.net", text: "plain words" });
+  cache.flushMessages();
+  assert.ok(fsp.existsSync(nodePath.join(dir, "messages.json")), "the file was written");
+  // a fresh module state — what a restart looks like
+  const fresh = await import("../src/cache.js?fresh=1");
+  fresh.initMessageStore(dir);
+  assert.ok(fresh.getCached("SNAP-PERSIST-1"), "the media node came back after the restart");
+  assert.equal(fresh.getCached("SNAP-TEXT-1"), null, "text-only entries are not persisted");
+  fsp.rmSync(dir, { recursive: true, force: true });
+});
+
+await check("reaction to a message the bot never received notes the owner instead of silence", async () => {
+  const chat = "2348000000019@s.whatsapp.net";
+  sent.length = 0;
+  await processMessage(deps, ownerSock, {
+    key: { remoteJid: chat, fromMe: true, id: "REACT-UNKNOWN-1" },
+    message: { reactionMessage: { key: { remoteJid: chat, id: "NEVER-SEEN-42", fromMe: false }, text: "👀" } }
+  });
+  assert.match(firstText(), /never received that message/, "the owner learns why nothing was pulled");
+  // reacting to a known plain-text message stays a silent no-op
+  const { cacheMessage } = await import("../src/cache.js");
+  cacheMessage("PLAINTEXT-1", { jid: chat, text: "just talking", node: { conversation: "just talking" } });
+  sent.length = 0;
+  await processMessage(deps, ownerSock, {
+    key: { remoteJid: chat, fromMe: true, id: "REACT-PLAINTEXT-1" },
+    message: { reactionMessage: { key: { remoteJid: chat, id: "PLAINTEXT-1", fromMe: false }, text: "👀" } }
+  });
+  assert.equal(sent.length, 0, "reactions to ordinary messages never trigger anything");
 });
 
 memory.saveNow();

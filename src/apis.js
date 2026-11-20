@@ -482,6 +482,21 @@ export async function transcribeAudio(buffer, { filename = "voice.ogg", mimetype
 // iTunes search — keyless, dependable from datacenter hosts. The song engine
 // uses this to separate the real "Alan Walker - Faded" from the many covers
 // that flood other libraries. Returns { artist, track, preview } or null.
+// How well a service's match actually answers the query. "weak" = only the
+// artist matched — a typo'd or off-title query — which is how "altare btw"
+// once announced a DIFFERENT artist's track as "✅ Found it".
+export function searchQuality(query, match) {
+  const words = String(query || "").toLowerCase().split(/[^a-z0-9]+/)
+    .filter(w => w.length >= 3 && !["the", "and", "official", "audio", "video", "lyrics", "song", "music", "full"].includes(w));
+  if (!words.length) return "strong"; // nothing meaningful to check against
+  const hay = (String(match?.title || "") + " " + String(match?.artist || "")).toLowerCase();
+  const hits = words.filter(w => hay.includes(w));
+  if (hits.length === words.length) return "strong";
+  // One-word queries are artist searches — an artist-only match still counts.
+  if (words.length === 1 && String(match?.artist || "").toLowerCase().includes(words[0])) return "strong";
+  return "weak";
+}
+
 export async function identifyTrack(query) {
   const term = String(query || "").trim().slice(0, 120);
   if (!term) return null;
@@ -495,11 +510,15 @@ export async function identifyTrack(query) {
       ? payload.results.find(item => item?.trackName && item?.artistName)
       : null;
     if (!hit) return null;
-    return {
+    const found = {
       artist: String(hit.artistName || "").trim(),
       track: String(hit.trackName || "").trim(),
       preview: /^https:\/\//.test(String(hit.previewUrl || "")) ? String(hit.previewUrl) : ""
     };
+    // A fuzzy match for a mistyped title is worse than no match: it announces
+    // the wrong song and "confirms" it. Only honest hits move on.
+    if (searchQuality(term, { title: found.track, artist: found.artist }) !== "strong") return null;
+    return found;
   } catch {
     return null;
   }

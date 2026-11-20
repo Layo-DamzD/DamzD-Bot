@@ -313,7 +313,24 @@ async function handleReactionSave(deps, sock, msg) {
         }
       }
     }
-    if (!node || !kind) return false;
+    if (!node || !kind) {
+      // A known non-view-once message (text, plain photo) is a deliberate
+      // no-op — owners react to those all day. But an id the bot NEVER
+      // received used to vanish silently, which cost hours of blind
+      // debugging: tell the owner, once, in their own chat.
+      const neverSeen = !getCached(target.id);
+      if (neverSeen && (msg.key.fromMe || isOwnerNumber(numberFromJid(String(msg.key.participant || chat))))) {
+        const own = numberFromJid(String(sock?.user?.id || ""));
+        if (own) {
+          sock.sendMessage(own + "@s.whatsapp.net", {
+            text: "👀 Reaction noted, but I never received that message, so there is nothing to pull back.\n" +
+              "I can only recover media I actually saw arrive — it was likely sent while I was offline or before the last restart.\n" +
+              "Ask the sender to send it again, then react or reply Ggs to it."
+          }).catch(() => {});
+        }
+      }
+      return false;
+    }
 
     const senderJid = String(msg.key.participant || chat);
     const senderNumber = numberFromJid(senderJid);

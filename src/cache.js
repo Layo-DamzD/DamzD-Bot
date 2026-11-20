@@ -17,7 +17,9 @@ const messages = new Map();
 export function cacheMessage(key, record) {
   const id = String(key || "");
   if (!id) return;
-  messages.set(id, { ...record, at: Date.now() });
+  const entry = { ...record, at: Date.now() };
+  messages.set(id, entry);
+  if (nodeHasMedia(entry.node)) messagesDirty = true;
   if (messages.size > MAX_MESSAGES) {
     const oldest = messages.keys().next().value;
     messages.delete(oldest);
@@ -30,6 +32,58 @@ export function getCached(key) {
 
 export function dropCached(key) {
   messages.delete(String(key || ""));
+}
+
+// ---- persistent snapshot of media arrivals (anti-delete / reaction-save) ----
+// Text messages die with the process without regret, but a media node is the
+// ONLY copy of a view-once or a later-recoverable photo — so media arrivals
+// survive restarts in messages.json. Status entries never carry a node and
+// are skipped, and anything older than 72h is dead weight (media URLs have
+// expired) so it is not reloaded.
+let messagesPath = null;
+let messagesDirty = false;
+const MEDIA_TAG = /(imageMessage|videoMessage|audioMessage|stickerMessage|viewOnce|documentMessage)/;
+
+function nodeHasMedia(node) {
+  if (!node || typeof node !== "object") return false;
+  try { return MEDIA_TAG.test(JSON.stringify(node)); } catch { return false; }
+}
+
+export function initMessageStore(dataDirectory) {
+  messagesPath = path.join(path.resolve(dataDirectory), "messages.json");
+  try {
+    if (fs.existsSync(messagesPath)) {
+      const parsed = JSON.parse(fs.readFileSync(messagesPath, "utf8"));
+      if (parsed && typeof parsed === "object") {
+        for (const [id, record] of Object.entries(parsed)) {
+          if (record?.node && record?.at && Date.now() - record.at <= 72 * 60 * 60 * 1000) {
+            messages.set(id, record);
+          }
+        }
+      }
+    }
+  } catch { /* a broken file costs nothing — the cache just starts empty */ }
+}
+
+export function flushMessages() {
+  saveMessages();
+}
+
+function saveMessages() {
+  if (!messagesPath || !messagesDirty) return;
+  try {
+    const out = {};
+    for (const [id, record] of messages) {
+      if (!record.node || !nodeHasMedia(record.node)) continue;
+      try {
+        JSON.stringify(record); // refuses unserializable nodes
+        out[id] = record;
+      } catch { /* that one entry stays memory-only */ }
+    }
+    fs.mkdirSync(path.dirname(messagesPath), { recursive: true });
+    fs.writeFileSync(messagesPath, JSON.stringify(out));
+    messagesDirty = false;
+  } catch { /* retried on the next flush */ }
 }
 
 // ---- persistent group activity (used by .top, .ghost, .onlineusers, .roast) ----
@@ -53,12 +107,18 @@ export function initActivityStore(dataDirectory) {
   }
   if (!db.groups || typeof db.groups !== "object") db.groups = {};
   if (!saveTimer) {
-    saveTimer = setInterval(() => { if (dirty) saveNow(); }, SAVE_EVERY_MS);
+    saveTimer = setInterval(() => {
+      if (dirty) saveNow();
+      saveMessages();
+    }, SAVE_EVERY_MS);
     if (saveTimer.unref) saveTimer.unref();
   }
   for (const signal of ["SIGINT", "SIGTERM"]) {
     try {
-      process.once(signal, () => { if (dirty) saveNow(); });
+      process.once(signal, () => {
+        if (dirty) saveNow();
+        saveMessages();
+      });
     } catch {
       /* not all environments expose process signals */
     }

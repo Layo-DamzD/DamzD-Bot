@@ -80,7 +80,7 @@ async function announceFound(ctx, song) {
 async function sendSong(ctx, query) {
   const { searchSong, downloadSong } = await import("../src/saavn.js");
   const { audiusFullTrack } = await import("../src/audius.js");
-  const { identifyTrack, fetchBuffer } = await import("../src/apis.js");
+  const { identifyTrack, fetchBuffer, searchQuality } = await import("../src/apis.js");
   await ctx.reply("🔍 Searching the music libraries for *" + query + "* …");
   // One identification up front, shared by every stage — the preview fallback
   // no longer needs a second call to Apple.
@@ -91,24 +91,33 @@ async function sendSong(ctx, query) {
   } catch {
     song = null;
   }
-  if (song && (song.artistVerified || !song.expectedArtist)) {
+  if (song && (song.artistVerified || !song.expectedArtist) && searchQuality(query, song) === "strong") {
     await announceFound(ctx, song);
     try {
       const full = await downloadSong(query, song);
       await ctx.typing(800);
       return sendAudioBuffer(ctx, full);
     } catch {
-      /* the library copy failed to transfer — fall through to Audius */
+      /* the library copy failed to transfer — say so, then keep going */
+      await ctx.reply("That copy would not transfer — trying the artist's own uploads and YouTube next…").catch(() => {});
     }
+  } else if (song) {
+    // A fuzzy match for a mistyped name is not a confirmation — say so
+    // instead of announcing the wrong song as "Found it".
+    await ctx.reply("The libraries only have a loose match for that name, so I will not pretend it is the one — trying other sources…").catch(() => {});
   }
   // Audius: the artist's own full uploads, up to 320 kbps. The gate is the
-  // uploader name — a remix published by another artist never passes.
+  // uploader name — a remix published by another artist never passes. The
+  // bytes come home verified: bare URL sends are how truncated audio happened.
   try {
     const aud = await audiusFullTrack(query, identified?.artist);
     if (aud) {
-      await announceFound(ctx, { title: aud.title, artist: aud.artist, duration: aud.duration });
-      await ctx.typing(800);
-      return await sendAudioUrl(ctx, aud.url, aud.artist + " - " + aud.title);
+      const buffer = await fetchBuffer(aud.url, { timeoutMs: 60000, label: "artist upload" });
+      if (buffer.length >= 150 * 1024) {
+        await announceFound(ctx, { title: aud.title, artist: aud.artist, duration: aud.duration });
+        await ctx.typing(800);
+        return await ctx.send({ audio: buffer, mimetype: "audio/mpeg", fileName: cleanTitle(aud.artist + " - " + aud.title) + ".mp3", ptt: false });
+      }
     }
   } catch {
     /* keep trying */

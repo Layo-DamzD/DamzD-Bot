@@ -8,7 +8,7 @@ import { JsonStore } from "./src/store.js";
 import { loadCommands, buildLookup } from "./src/loader.js";
 import { DamzDBot } from "./src/runtime.js";
 import { startHealthServer } from "./src/health.js";
-import { initActivityStore } from "./src/cache.js";
+import { initActivityStore, initMessageStore } from "./src/cache.js";
 import { initViewOnceStore } from "./src/viewonce.js";
 import { SessionManager } from "./src/sessions.js";
 
@@ -31,7 +31,9 @@ async function main() {
 
   // Persistent group-activity store — .ghost/.top/.onlineusers survive restarts.
   initActivityStore(path.resolve(config.dataDirectory));
-  // The view-once stash too — recovery and reaction-save work across restarts.
+  // The media snapshot (anti-delete / reaction-save) and the view-once stash
+  // too — recovery works across restarts now.
+  initMessageStore(path.resolve(config.dataDirectory));
   initViewOnceStore(path.resolve(config.dataDirectory));
 
   const commands = await loadCommands(path.join(directory, "commands"));
