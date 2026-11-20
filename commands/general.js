@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { botImagePayload } from "../src/utils.js";
+import { botImageMedia } from "../src/utils.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const APP_VERSION = (() => {
@@ -74,6 +74,9 @@ function menuHeader(commands, config) {
   return [
     BOX_TOP + config.name + " 〕",
     BOX_LINE + "◇ " + mbold("VERSION") + ": " + APP_VERSION,
+    BOX_LINE + "◇ " + mbold("OWNER") + ": " + (config.ownerName || "the owner"),
+    BOX_LINE + "◇ " + mbold("MODE") + ": " + String(config.accessMode || "self").toUpperCase(),
+    BOX_LINE + "◇ " + mbold("UPTIME") + ": " + uptimeText(),
     BOX_LINE + "◇ " + mbold("COMMANDS LOADED") + ": " + loadedCount(commands),
     "│"
   ].join("\n");
@@ -98,17 +101,21 @@ function buildCategoryOverview(commands, config) {
   return lines.join("\n") + "\n\n" + MENU_ENDING;
 }
 
-// The bot's picture goes out FIRST on .menu and .help — the menu text follows
-// it as one unbroken message. A missing or broken picture never blocks the
-// text: the picture is simply skipped.
-async function sendBotImage(ctx) {
-  const payload = botImagePayload(ctx.config);
-  if (!payload) return;
-  try {
-    await ctx.send(payload);
-  } catch {
-    /* the picture is decorative — the text still goes out */
+// The bot's picture and the menu text go out as ONE message — the picture
+// with the text as its caption, the way the big menus deliver. The picture
+// is compressed first so it auto-loads on mobile data instead of sitting
+// there as a "Photo" the human has to tap. A missing or broken picture never
+// blocks the text: it degrades to the split send, then to a plain reply.
+async function sendMenuWithImage(ctx, text) {
+  const payload = await botImageMedia(ctx.config);
+  if (payload) {
+    try {
+      await ctx.send({ ...payload, caption: text });
+      return;
+    } catch { /* fall through to the split send */ }
+    try { await ctx.send(payload); } catch { /* decorative */ }
   }
+  await ctx.replyOnce(text);
 }
 
 // The connect note sent to the owner's own chat when the bot comes online —
@@ -118,6 +125,9 @@ export function connectNote(config) {
     BOX_TOP + "⚡ " + config.name + " 〕",
     BOX_LINE + "◇ " + mbold("STATUS") + ": connected and online ✅",
     BOX_LINE + "◇ " + mbold("VERSION") + ": " + APP_VERSION,
+    BOX_LINE + "◇ " + mbold("OWNER") + ": " + (config.ownerName || "the owner"),
+    BOX_LINE + "◇ " + mbold("MODE") + ": " + String(config.accessMode || "self").toUpperCase(),
+    BOX_LINE + "◇ " + mbold("UPTIME") + ": " + uptimeText(),
     BOX_LINE + "◇ " + mbold("PREFIX") + ": " + config.prefix,
     BOX_LINE + "◇ " + mbold("MY TIME") + ": " + lagosTime() + " (WAT)",
     "│",
@@ -241,8 +251,7 @@ export default [
         );
         return;
       }
-      if (!wanted) await sendBotImage(ctx);
-      await ctx.replyOnce(section || buildCategoryOverview(ctx.commands, ctx.config));
+      await sendMenuWithImage(ctx, section || buildCategoryOverview(ctx.commands, ctx.config));
     }
   },
   {
@@ -253,8 +262,7 @@ export default [
     run: async ctx => {
       const wanted = String(ctx.args || "").trim();
       if (!wanted) {
-        await sendBotImage(ctx);
-        await ctx.replyOnce(buildFullList(ctx.commands, ctx.config));
+        await sendMenuWithImage(ctx, buildFullList(ctx.commands, ctx.config));
         return;
       }
       const detail = buildCommandDetail(ctx.commands, ctx.config, wanted);

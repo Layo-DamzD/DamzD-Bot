@@ -52,6 +52,23 @@ export async function ffmpegAvailable() {
   return (await resolveFfmpeg()) !== null;
 }
 
+// A small JPEG for inline WhatsApp delivery: a big PNG (the 1.8MB bot
+// picture) exceeds the auto-download threshold on mobile data, so it arrives
+// as a "Photo" placeholder the human has to tap manually. ~1080px at q:v 5
+// lands far below the threshold. Falls back to the original bytes when
+// ffmpeg is unavailable — the picture still goes out, just heavy.
+export async function compressForWhatsApp(buffer) {
+  try {
+    return await convert(buffer, "in.png", "out.jpg", [
+      "-vf", "scale=min(1080\\,iw):-2",
+      "-frames:v", "1",
+      "-q:v", "5"
+    ]);
+  } catch {
+    return buffer;
+  }
+}
+
 async function convert(inputBuffer, inputName, outputName, args) {
   const bin = await resolveFfmpeg();
   if (!bin) {

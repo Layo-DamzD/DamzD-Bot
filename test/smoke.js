@@ -104,8 +104,11 @@ await check("ping draws the boxed status card in the megamenu style", async () =
 await check("menu shows the boxed section overview with the Great DamzD ending", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".menu"));
-  const text = sent.map(item => item.content.text || "").join("\n");
+  const text = sent.map(item => item.content.text || item.content.caption || "").join("\n");
   assert.match(text, /╭──〔 DamzD 〕/, "the header box carries the bot name");
+  assert.match(text, /𝗢𝗪𝗡𝗘𝗥/, "the owner row the big menus carry");
+  assert.match(text, /𝗠𝗢𝗗𝗘/, "the access-mode row");
+  assert.match(text, /𝗨𝗣𝗧𝗜𝗠𝗘/, "the uptime row");
   assert.match(text, /𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦 𝗟𝗢𝗔𝗗𝗘𝗗: \d+/, "live loaded-command count");
   assert.ok(!/𝗣𝗥𝗘𝗙𝗜𝗫/.test(text), "no prefix row in the header — removed as requested");
   assert.match(text, /𝗡𝗘𝗪𝗦/, "News section listed");
@@ -119,7 +122,7 @@ await check("menu shows the boxed section overview with the Great DamzD ending",
 await check("menu section opens with full command list", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".menu news"));
-  const text = sent.at(-1).content.text;
+  const text = sent.at(-1).content.text || sent.at(-1).content.caption;
   assert.match(text, /╭──〔 📰 𝗡𝗘𝗪𝗦 〕/);
   assert.match(text, /\.bbc — /);
   assert.match(text, /✦ 𝗣𝗢𝗪𝗘𝗥𝗘𝗗 𝗕𝗬 𝗚𝗥𝗘𝗔𝗧 𝗗𝗔𝗠𝗭𝗗/);
@@ -128,8 +131,8 @@ await check("menu section opens with full command list", async () => {
 await check(".help draws the full boxed megamenu like the classic bots", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".help"));
-  // long replies may be chunked — read every piece, not just the tail
-  const text = sent.map(item => item.content?.text || "").join("\n");
+  // long replies may be chunked — read every piece, caption or text
+  const text = sent.map(item => item.content?.text || item.content?.caption || "").join("\n");
   assert.match(text, /╭──〔 DamzD 〕/);
   assert.match(text, /╭──〔 🤖 𝗚𝗘𝗡𝗘𝗥𝗔𝗟 〕/);
   assert.match(text, /╰────────────────/);
@@ -392,7 +395,7 @@ await check(".accessmode public opens the AI to group members, private closes it
   const memberMenu = textMessage(".menu", { jid: "123@g.us", fromMe: false });
   memberMenu.key.participant = "2348555000009@s.whatsapp.net";
   await processMessage(deps, nonOwnerSock, memberMenu);
-  const menu = sent.map(item => item.content?.text || "").join("\n");
+  const menu = sent.map(item => item.content?.text || item.content?.caption || "").join("\n");
   assert.match(menu, /╭──〔 DamzD 〕/, "a group member pulls the boxed list");
   assert.match(menu, /✦ 𝗣𝗢𝗪𝗘𝗥𝗘𝗗 𝗕𝗬 𝗚𝗥𝗘𝗔𝗧 𝗗𝗔𝗠𝗭𝗗/);
   // back to private: the same mention gets the receptionist again
@@ -471,14 +474,14 @@ await check("view-once stanzas are cached so anyone can recover what the bot cou
   assert.ok(hit, "the view-once stanza is remembered");
   assert.equal(hit.kind, "image");
   assert.equal(findCachedViewOnce("2348777666555@s.whatsapp.net", "NOT-THE-ONE"), null, "a wrong stanza id finds nothing");
-  // The cache stays bounded — 200 entries, oldest evicted first.
-  for (let i = 0; i < 205; i += 1) {
+  // The cache stays bounded — 400 entries, oldest evicted first.
+  for (let i = 0; i < 405; i += 1) {
     stashViewOnce({
       key: { remoteJid: "2348000000009@s.whatsapp.net", id: "FLOOD-" + i },
       message: { viewOnceMessage: { message: { imageMessage: { mimetype: "image/jpeg" } } } }
     });
   }
-  assert.ok(viewOnceCacheSize() <= 200, "the cache prunes itself");
+  assert.ok(viewOnceCacheSize() <= 400, "the cache prunes itself");
 });
 
 await check(".Ggs recovery failures stay silent for members and note the owner only", async () => {
@@ -731,26 +734,26 @@ await check("no reply text ever contains promotional content", async () => {
   }
 });
 
-await check(".menu sends the bot picture first, then the menu as ONE message", async () => {
+await check(".menu delivers the bot picture and the menu as ONE captioned message", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".menu"));
   const sends = sent.filter(item => !item.content.react); // the ⚡ ack is a reaction, not a message
-  assert.equal(sends.length, 2, "exactly two sends: the picture, then one text");
-  assert.ok(Buffer.isBuffer(sends[0].content.image), "the picture goes first");
-  assert.ok(!sends[0].content.text, "the picture carries no caption");
-  const menu = sends[1].content.text;
+  assert.equal(sends.length, 1, "one message only: the picture with the menu as its caption");
+  assert.ok(Buffer.isBuffer(sends[0].content.image), "the picture carries the text");
+  const menu = String(sends[0].content.caption || "");
   assert.match(menu, /DamzD/);
   assert.match(menu, /SECTIONS|𝗦𝗘𝗖𝗧𝗜𝗢𝗡𝗦/);
   assert.match(menu, /GREAT DAMZD|𝗚𝗥𝗘𝗔𝗧 𝗗𝗔𝗠𝗭𝗗/);
 });
 
-await check(".help sends the picture first and the full list as ONE unbroken text", async () => {
+await check(".help delivers the picture and the full list as ONE captioned message", async () => {
   sent.length = 0;
   await processMessage(deps, ownerSock, textMessage(".help"));
   const sends = sent.filter(item => !item.content.react); // the ⚡ ack is a reaction, not a message
-  assert.equal(sends.length, 2, "exactly two sends: the picture, then one text");
-  assert.ok(Buffer.isBuffer(sends[0].content.image), "the picture goes first");
-  const help = sends[1].content.text;
+  assert.equal(sends.length, 1, "one message only: the picture with the list as its caption");
+  assert.ok(Buffer.isBuffer(sends[0].content.image), "the picture carries the text");
+  const help = String(sends[0].content.caption || "");
+  assert.ok(help.length > 500, "the caption is the full list, not a stub");
   assert.match(help, /ping/i);
   assert.match(help, /menu/i);
 });
@@ -759,8 +762,11 @@ await check("connectNote greets the owner in the menu's look", async () => {
   const { connectNote } = await import("../commands/general.js");
   const note = connectNote({ name: "DamzD", prefix: "." });
   assert.match(note, /connected and online/);
-  assert.match(note, /1\.4\.26/);
+  assert.match(note, /1\.4\.27/);
   assert.match(note, /PREFIX|𝗣𝗥𝗘𝗙𝗜𝗫/);
+  assert.match(note, /OWNER|𝗢𝗪𝗡𝗘𝗥/);
+  assert.match(note, /MODE|𝗠𝗢𝗗𝗘/);
+  assert.match(note, /UPTIME|𝗨𝗣𝗧𝗜𝗠𝗘/);
   assert.match(note, /menu/);
 });
 
@@ -813,6 +819,8 @@ await check("bare words: song in a GC with no dot; menu stays dot-only there", a
   assert.deepEqual(resolveBareCommand("song darlene hello", true), { name: "song", args: "darlene hello" }, '"song <name>" in a GC fetches the song');
   assert.deepEqual(resolveBareCommand("play cold water", true), { name: "play", args: "cold water" });
   assert.deepEqual(resolveBareCommand("save", false), { name: "save", args: "" });
+  assert.deepEqual(resolveBareCommand("save dp", false), { name: "pp", args: "" }, '"save dp" is the profile-picture command');
+  assert.deepEqual(resolveBareCommand("Save profile picture", true), { name: "pp", args: "" }, "works bare in a GC too");
   assert.deepEqual(resolveBareCommand("menu", false), { name: "menu", args: "" }, "DMs get the info words bare");
   assert.equal(resolveBareCommand("menu", true), null, "in a GC menu still wants the dot");
   assert.equal(resolveBareCommand("how far", true), null, "plain talk never parses as a command");
@@ -887,6 +895,42 @@ await check("reaction-save: reacting to a view-once pulls it back — access-gat
   sent.length = 0;
   await processMessage(deps, nonOwnerSock, react("NOT-IN-STORE"));
   assert.equal(sent.length, 0, "reacting to a normal message does nothing");
+  setAccessMode("self");
+});
+
+await check("view-once stash catches ephemeral-wrapped view-onces", async () => {
+  const { findCachedViewOnce } = await import("../src/viewonce.js");
+  const chat = "2348000000019@s.whatsapp.net";
+  sent.length = 0;
+  await processMessage(deps, nonOwnerSock, {
+    key: { remoteJid: chat, fromMe: false, id: "VV-EPH-1" },
+    message: { ephemeralMessage: { message: { viewOnceMessageV2: { message: { imageMessage: {
+      url: "https://mmg.whatsapp.net/v/t62.7118-24/eph.jpg", directPath: "/mms/image/eph", mimetype: "image/jpeg"
+    } } } } } }
+  });
+  assert.equal(sent.length, 0, "arrives silently");
+  assert.ok(findCachedViewOnce(chat, "VV-EPH-1"), "the stash found it UNDER the ephemeral wrapper");
+});
+
+await check("reaction falls back to the anti-delete snapshot (view-once only)", async () => {
+  const { cacheMessage } = await import("../src/cache.js");
+  const chat = "2348000000019@s.whatsapp.net";
+  // An ephemeral-wrapped view-once that the stash lost — only the snapshot has it.
+  cacheMessage("VV-SNAP-9", { jid: chat, node: { ephemeralMessage: { message: { viewOnceMessageV2: { message: { imageMessage: {
+    url: "https://mmg.whatsapp.net/v/t62.7118-24/snap.jpg", directPath: "/mms/image/snap", mimetype: "image/jpeg"
+  } } } } } } });
+  // A plain photo — reactions to it must stay no-ops.
+  cacheMessage("PLAIN-SNAP-9", { jid: chat, node: { imageMessage: { url: "https://mmg.whatsapp.net/v/t62.7118-24/plain.jpg", mimetype: "image/jpeg" } } });
+  const reactTo = id => ({
+    key: { remoteJid: chat, fromMe: true, id: "REACT-" + Math.random().toString(36).slice(2) },
+    message: { reactionMessage: { key: { remoteJid: chat, id, fromMe: false }, text: "👀" } }
+  });
+  sent.length = 0;
+  await processMessage(deps, ownerSock, reactTo("PLAIN-SNAP-9"));
+  assert.equal(sent.length, 0, "a plain photo's reaction never triggers anything");
+  sent.length = 0;
+  await processMessage(deps, ownerSock, reactTo("VV-SNAP-9"));
+  assert.match(firstText(), /could not be pulled back/, "the snapshot fallback found the view-once (fetch then failed — owner note proves the path ran)");
   setAccessMode("self");
 });
 

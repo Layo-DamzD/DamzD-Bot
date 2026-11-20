@@ -80,7 +80,7 @@ async function announceFound(ctx, song) {
 async function sendSong(ctx, query) {
   const { searchSong, downloadSong } = await import("../src/saavn.js");
   const { audiusFullTrack } = await import("../src/audius.js");
-  const { identifyTrack } = await import("../src/apis.js");
+  const { identifyTrack, fetchBuffer } = await import("../src/apis.js");
   await ctx.reply("🔍 Searching the music libraries for *" + query + "* …");
   // One identification up front, shared by every stage — the preview fallback
   // no longer needs a second call to Apple.
@@ -117,7 +117,7 @@ async function sendSong(ctx, query) {
     const result = await searchYouTubeAudio(query);
     await announceFound(ctx, { title: result.title });
     await ctx.typing(800);
-    return await sendAudioUrl(ctx, result.url, result.title);
+    return await ctx.send({ audio: result.buffer, mimetype: "audio/mpeg", fileName: cleanTitle(result.title) + ".mp3", ptt: false });
   } catch {
     /* keep trying */
   }
@@ -125,19 +125,35 @@ async function sendSong(ctx, query) {
     try {
       const found = await searchYouTubeNabees(query);
       const audio = await resolveYouTubeAudioNabees(found.url);
+      const buffer = await fetchBuffer(audio.url, { timeoutMs: 60000, label: "rescue stream" });
+      if (buffer.length < 150 * 1024) throw new Error("the rescue stream came back broken");
       await announceFound(ctx, { title: audio.title || found.title });
       await ctx.typing(800);
-      return await sendAudioUrl(ctx, audio.url, audio.title || found.title);
+      return await ctx.send({ audio: buffer, mimetype: "audio/mpeg", fileName: cleanTitle(audio.title || found.title) + ".mp3", ptt: false });
     } catch {
       /* keep trying */
     }
   }
   if (identified?.preview) {
-    await ctx.reply(
-      "The full-track services are refusing me right now, so here is the official short preview of \"" +
-      identified.track + "\" by " + identified.artist + " instead — try again later for the whole song."
-    );
-    return sendAudioUrl(ctx, identified.preview, identified.artist + " - " + identified.track + " (preview)");
+    // The preview is downloaded and checked BEFORE it is offered: a bare URL
+    // send on a bad host is exactly how that 3-second wreck got delivered.
+    // Under 150KB is a broken transfer — silence beats junk.
+    let previewBuffer = null;
+    try {
+      previewBuffer = await fetchBuffer(identified.preview, { timeoutMs: 45000, label: "preview" });
+    } catch { previewBuffer = null; }
+    if (previewBuffer && previewBuffer.length >= 150 * 1024) {
+      await ctx.reply(
+        "The full-track services are refusing me right now, so here is the official preview of \"" +
+        identified.track + "\" by " + identified.artist + " instead — try again later for the whole song."
+      );
+      return await ctx.send({
+        audio: previewBuffer,
+        mimetype: "audio/mpeg",
+        fileName: cleanTitle(identified.artist + " - " + identified.track + " (preview)") + ".mp3",
+        ptt: false
+      });
+    }
   }
   throw new Error(
     "I could not get a clean copy of that song — try the exact title, or add a free NABEES_API_KEY (apis.nabeestech.com) to my settings for the full YouTube catalogue"

@@ -234,7 +234,14 @@ export async function searchYouTubeAudio(query) {
     try {
       const streams = await pipedRequest("/streams/" + video.id, { timeoutMs: 20000, label: "music service" });
       const url = pickBestAudio(streams?.audioStreams);
-      if (url) return { url, title: video.title };
+      if (!url) continue;
+      // The bytes come home verified — a bare URL send on a flaky host is how
+      // truncated 3-second wrecks got delivered. Under 150KB is a broken
+      // transfer, not a song: try the next candidate instead.
+      const { fetchBuffer } = await import("./apis.js");
+      const buffer = await fetchBuffer(url, { timeoutMs: 60000, label: "audio stream" });
+      if (buffer.length < 150 * 1024) continue;
+      return { buffer, title: video.title };
     } catch { /* next candidate */ }
   }
   throw new Error("I could not get the audio for that. Try another song name.");

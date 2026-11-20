@@ -16,13 +16,14 @@ import { resolveCommandInput } from "./loader.js";
 import { askAI, hasAIBrain } from "./ai.js";
 import { downloadContentFromMessage } from "baileys";
 import { detectPlatform, resolveAllInOne, mediaKind, cleanTitle } from "./downloads.js";
-import { messageText, mentionedJids, quotedParticipant, numberFromJid, sleep, botImagePayload, unwrapMessage } from "./utils.js";
+import { messageText, mentionedJids, quotedParticipant, numberFromJid, sleep, botImageMedia, unwrapMessage } from "./utils.js";
 import { config as appConfig, isOwnerNumber, addRuntimeOwner } from "./config.js";
 import { WELCOME_ON, GOODBYE_ON, ANTILINK_ON } from "./store.js";
 import { registerCallHook, runSideEffects, recordActivity } from "./hooks.js";
 import { HARD_PAUSED, PAUSE_NOTE } from "./flags.js";
 import { resolveJidNumber } from "./lidmap.js";
-import { stashViewOnce, findCachedViewOnce } from "./viewonce.js";
+import { getCached } from "./cache.js";
+import { stashViewOnce, findCachedViewOnce, findViewOnceCarrier } from "./viewonce.js";
 import { connectNote } from "../commands/general.js";
 
 const MAX_PROCESSED_IDS = 2000;
@@ -36,6 +37,12 @@ const AI_COOLDOWN_MS = 2500;
 // and the bare words are two doors to the same commands.
 const BARE_GROUP_WORDS = ["song", "play", "music", "video", "ytmp4", "ggs", "gg", "save"];
 const BARE_DM_WORDS = ["menu", "help", "ping", "sections"];
+const REACTION_MEDIA_KINDS = [
+  ["imageMessage", "image"],
+  ["videoMessage", "video"],
+  ["stickerMessage", "sticker"],
+  ["audioMessage", "audio"]
+];
 export function resolveBareCommand(text, isGroup) {
   const value = String(text || "").trim();
   if (!value || value.startsWith(appConfig.prefix)) return null;
@@ -43,6 +50,10 @@ export function resolveBareCommand(text, isGroup) {
   const word = parts[0].toLowerCase();
   const words = isGroup ? BARE_GROUP_WORDS : BARE_GROUP_WORDS.concat(BARE_DM_WORDS);
   if (!words.includes(word)) return null;
+  // "save dp" / "save profile picture" is really the profile-picture command
+  if (word === "save" && /^\s*(dp|profile|pic|picture|photo)\b/i.test(value.slice(word.length))) {
+    return { name: "pp", args: "" };
+  }
   return { name: word, args: parts.slice(1).join(" ") };
 }
 
@@ -286,8 +297,23 @@ async function handleReactionSave(deps, sock, msg) {
     // An empty reaction text is a removal — never a trigger.
     if (!target?.id || !String(reaction.text || "").trim()) return false;
     const chat = String(msg.key.remoteJid || "");
-    const cached = findCachedViewOnce(target.remoteJid || chat, target.id);
-    if (!cached) return false;
+    let cached = findCachedViewOnce(target.remoteJid || chat, target.id);
+    let kind = cached?.kind;
+    let node = cached?.node;
+    // Not in the view-once stash (restart, TTL, wrapper shape)? The
+    // anti-delete snapshot still holds the last 600 arrivals — but the
+    // fallback only fires when that snapshot really was a view-once, so a
+    // reaction to a plain photo stays a no-op.
+    if (!cached) {
+      const carrier = findViewOnceCarrier(getCached(target.id)?.node);
+      if (carrier) {
+        const inner = unwrapMessage(carrier);
+        for (const [nodeKey, kd] of REACTION_MEDIA_KINDS) {
+          if (inner[nodeKey]) { node = inner[nodeKey]; kind = kd; break; }
+        }
+      }
+    }
+    if (!node || !kind) return false;
 
     const senderJid = String(msg.key.participant || chat);
     const senderNumber = numberFromJid(senderJid);
@@ -295,9 +321,7 @@ async function handleReactionSave(deps, sock, msg) {
     const banned = deps.store.get("banned", []).map(entry => String(entry).replace(/\D/g, ""));
     if (!owner && (appConfig.accessMode !== "public" || banned.includes(senderNumber))) return false;
 
-    const kind = cached.kind;
     if (!["image", "video", "audio", "sticker"].includes(kind)) return false;
-    const node = cached.node;
     const stream = await downloadContentFromMessage(node, kind === "sticker" ? "sticker" : kind);
     const chunks = [];
     for await (const chunk of stream) chunks.push(chunk);
@@ -675,10 +699,14 @@ export class DamzDBot {
         if (!this.introSent) {
           this.introSent = true;
           if (ownNumber) {
-            const ownJid = ownNumber + "@s.whatsapp.net";
-            const picture = botImagePayload(appConfig);
-            if (picture) sock.sendMessage(ownJid, picture).catch(() => {});
-            sock.sendMessage(ownJid, { text: connectNote(appConfig) }).catch(() => {});
+            // One message: the picture with the greeting as its caption — the
+            // split text-then-image send read like two different bots.
+            const note = connectNote(appConfig);
+            botImageMedia(appConfig).then(picture => {
+              return picture
+                ? sock.sendMessage(ownJid, { ...picture, caption: note })
+                : sock.sendMessage(ownJid, { text: note });
+            }).catch(() => {});
           }
         }
       } else if (connection === "close") {

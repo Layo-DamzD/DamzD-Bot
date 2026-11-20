@@ -50,6 +50,34 @@ async function downloadNode(node, kind) {
   }
 }
 
+// Last resort for a quoted view-once: the anti-delete snapshot holds the last
+// 600 arrivals with their FULL media metadata. When the view-once stash lost
+// the original (restart, TTL, wrapper shape), the quote's stanza id can still
+// be matched back to the cached arrival — but only when that arrival really
+// was a view-once, so plain media never gets re-sent by accident.
+async function cachedFromSnapshot(stanzaId) {
+  try {
+    const { getCached } = await import("../src/cache.js");
+    const { findViewOnceCarrier } = await import("../src/viewonce.js");
+    const carrier = findViewOnceCarrier(getCached(stanzaId)?.node);
+    if (!carrier) return null;
+    const { unwrapMessage } = await import("../src/utils.js");
+    const inner = unwrapMessage(carrier);
+    const kinds = [
+      ["imageMessage", "image"],
+      ["videoMessage", "video"],
+      ["stickerMessage", "sticker"],
+      ["audioMessage", "audio"]
+    ];
+    for (const [key, kind] of kinds) {
+      if (inner[key]) return { node: inner[key], kind };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function quotedMedia(ctx, { allowDocument = true } = {}) {
   const info = ctx.msg.message?.extendedTextMessage?.contextInfo;
   const quoted = info?.quotedMessage;
@@ -74,13 +102,13 @@ async function quotedMedia(ctx, { allowDocument = true } = {}) {
       // stripped by WhatsApp, so the download can only fail. If the bot saw
       // the original view-once in this chat, the cache still holds the full
       // metadata — match it back by the quoted stanza id and download that.
-      const cached = findCachedViewOnce(ctx.jid, info?.stanzaId);
+      const cached = await findCachedViewOnce(ctx.jid, info?.stanzaId) || await cachedFromSnapshot(info?.stanzaId);
       if (cached) return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
       throw error;
     }
   }
   // A stripped quote can lose the media node entirely — try the cache first.
-  const cached = findCachedViewOnce(ctx.jid, info?.stanzaId);
+  const cached = await findCachedViewOnce(ctx.jid, info?.stanzaId) || await cachedFromSnapshot(info?.stanzaId);
   if (cached) return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
   throw new Error("I could not find any image, video or sticker in that message");
 }
@@ -202,7 +230,7 @@ export default [
       if (!target) throw new Error("I could not resolve your own chat");
       const info = ctx.msg.message?.extendedTextMessage?.contextInfo;
       const quoted = info?.quotedMessage;
-      if (!quoted) throw new Error("reply to the status or media to save");
+      if (!quoted) throw new Error("reply to the status or media to save — or say save dp for a profile picture");
       const { unwrapMessage } = await import("../src/utils.js");
       const inner = unwrapMessage(quoted);
       try {

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { compressForWhatsApp } from "./mediautil.js";
 
 // The bot's picture (assets/bot-image.png by default, or a BOT_IMAGE URL) —
 // sent first on .menu, .help and the connect note. A URL passes straight
@@ -20,6 +21,23 @@ export function botImagePayload(config) {
   } catch {
     return null;
   }
+}
+
+// The send-ready picture: same sources as botImagePayload, but a local file
+// is compressed down to a WhatsApp-inline-friendly JPEG once (and cached) so
+// it auto-loads on the phone instead of waiting for a manual download. URLs
+// pass through untouched; null when nothing usable is set.
+let botImageMediaPromise = null;
+export async function botImageMedia(config) {
+  const payload = botImagePayload(config);
+  if (!payload) return null;
+  if (payload.image?.url) return payload;
+  if (!botImageMediaPromise) {
+    botImageMediaPromise = compressForWhatsApp(payload.image)
+      .then(buffer => ({ image: buffer }))
+      .catch(() => payload);
+  }
+  return botImageMediaPromise;
 }
 
 const WRAPPER_KEYS = [
