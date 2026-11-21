@@ -99,12 +99,25 @@ async function sendSong(ctx, query) {
       return sendAudioBuffer(ctx, full);
     } catch {
       /* the library copy failed to transfer — say so, then keep going */
-      await ctx.reply("That copy would not transfer — trying the artist's own uploads and YouTube next…").catch(() => {});
+      await ctx.reply("That copy would not transfer — trying YouTube next…").catch(() => {});
     }
-  } else if (song) {
-    // A fuzzy match for a mistyped name is not a confirmation — say so
-    // instead of announcing the wrong song as "Found it".
-    await ctx.reply("The libraries only have a loose match for that name, so I will not pretend it is the one — trying other sources…").catch(() => {});
+  }
+  // A fuzzy match for a mistyped name is not a confirmation: a weak match
+  // moves on quietly instead of announcing the wrong song as "Found it".
+  // YouTube via NABEES comes first among the fallbacks — a real YouTube
+  // search and convert, the most reliable full-track source there is. It is
+  // ALWAYS on: the free NABEES key works, a personal NABEES_API_KEY only
+  // raises the quota. A missing key must never switch the service off again.
+  try {
+    const found = await searchYouTubeNabees(query);
+    const audio = await resolveYouTubeAudioNabees(found.url);
+    const buffer = await fetchBuffer(audio.url, { timeoutMs: 60000, label: "rescue stream" });
+    if (buffer.length < 150 * 1024) throw new Error("the rescue stream came back broken");
+    await announceFound(ctx, { title: audio.title || found.title });
+    await ctx.typing(800);
+    return await ctx.send({ audio: buffer, mimetype: "audio/mpeg", fileName: cleanTitle(audio.title || found.title) + ".mp3", ptt: false });
+  } catch {
+    /* keep trying */
   }
   // Audius: the artist's own full uploads, up to 320 kbps. The gate is the
   // uploader name — a remix published by another artist never passes. The
@@ -127,20 +140,6 @@ async function sendSong(ctx, query) {
     await announceFound(ctx, { title: result.title });
     await ctx.typing(800);
     return await ctx.send({ audio: result.buffer, mimetype: "audio/mpeg", fileName: cleanTitle(result.title) + ".mp3", ptt: false });
-  } catch {
-    /* keep trying */
-  }
-  // The YouTube rescue path is ALWAYS on — the free NABEES key works, a
-  // personal NABEES_API_KEY only raises the quota. A missing key must never
-  // switch the service off again.
-  try {
-    const found = await searchYouTubeNabees(query);
-    const audio = await resolveYouTubeAudioNabees(found.url);
-    const buffer = await fetchBuffer(audio.url, { timeoutMs: 60000, label: "rescue stream" });
-    if (buffer.length < 150 * 1024) throw new Error("the rescue stream came back broken");
-    await announceFound(ctx, { title: audio.title || found.title });
-    await ctx.typing(800);
-    return await ctx.send({ audio: buffer, mimetype: "audio/mpeg", fileName: cleanTitle(audio.title || found.title) + ".mp3", ptt: false });
   } catch {
     /* keep trying */
   }

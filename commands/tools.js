@@ -102,8 +102,22 @@ async function quotedMedia(ctx, { allowDocument = true } = {}) {
       // stripped by WhatsApp, so the download can only fail. If the bot saw
       // the original view-once in this chat, the cache still holds the full
       // metadata — match it back by the quoted stanza id and download that.
+      const { refreshMediaLocation } = await import("../src/utils.js");
       const cached = await findCachedViewOnce(ctx.jid, info?.stanzaId) || await cachedFromSnapshot(info?.stanzaId);
-      if (cached) return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
+      if (cached) {
+        try {
+          return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
+        } catch {
+          // Even the stashed arrival lost its media location — the media-retry
+          // protocol is the last chance for a fresh one.
+          await refreshMediaLocation(ctx.sock, { remoteJid: ctx.jid, id: info?.stanzaId, participant: info?.participant }, cached.node);
+          return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
+        }
+      }
+      // No cached copy at all: the quote itself still carries the mediaKey,
+      // which is exactly what the retry protocol needs to re-serve the media.
+      const refreshed = await refreshMediaLocation(ctx.sock, { remoteJid: info?.remoteJid || ctx.jid, id: info?.stanzaId, participant: info?.participant }, node);
+      if (refreshed) return { buffer: await downloadNode(node, kind), kind, node };
       throw error;
     }
   }

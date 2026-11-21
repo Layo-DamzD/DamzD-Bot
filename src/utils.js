@@ -175,3 +175,31 @@ export function isHttpsUrl(value) {
     return false;
   }
 }
+
+const MEDIA_NODE_KEYS = ["imageMessage", "videoMessage", "audioMessage", "stickerMessage", "documentMessage"];
+
+// WhatsApp strips or expires the media location on messages the bot still
+// holds: quotes lose url/directPath outright, and reconnect syncs can serve
+// arrivals without them too ("No valid media URL or directPath present in
+// message"). The official media-retry protocol asks WhatsApp and the
+// sender's device to re-serve fresh media info for a message whose mediaKey
+// we still have — then the very same node downloads fine. Mutates the node
+// in place; returns false when there is nothing to retry with.
+export async function refreshMediaLocation(sock, key, node) {
+  try {
+    const nodeKey = MEDIA_NODE_KEYS.find(k => node?.[k]);
+    if (!nodeKey || !key?.id || !node.mediaKey || typeof sock?.updateMediaMessage !== "function") return false;
+    await sock.updateMediaMessage({
+      key: {
+        remoteJid: String(key.remoteJid || ""),
+        id: String(key.id),
+        fromMe: Boolean(key.fromMe),
+        ...(key.participant ? { participant: String(key.participant) } : {})
+      },
+      message: { [nodeKey]: node }
+    });
+    return true;
+  } catch {
+    return false; // the caller's original error stands
+  }
+}

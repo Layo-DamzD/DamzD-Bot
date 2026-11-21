@@ -339,10 +339,27 @@ async function handleReactionSave(deps, sock, msg) {
     if (!owner && (appConfig.accessMode !== "public" || banned.includes(senderNumber))) return false;
 
     if (!["image", "video", "audio", "sticker"].includes(kind)) return false;
-    const stream = await downloadContentFromMessage(node, kind === "sticker" ? "sticker" : kind);
-    const chunks = [];
-    for await (const chunk of stream) chunks.push(chunk);
-    const buffer = Buffer.concat(chunks);
+    let buffer;
+    try {
+      const stream = await downloadContentFromMessage(node, kind === "sticker" ? "sticker" : kind);
+      const chunks = [];
+      for await (const chunk of stream) chunks.push(chunk);
+      buffer = Buffer.concat(chunks);
+    } catch {
+      // Stripped or expired media location — the media-retry protocol is the
+      // one chance left: ask WhatsApp to re-serve fresh media info for the
+      // original message, then pull the same node again.
+      const refreshed = await refreshMediaLocation(sock, {
+        remoteJid: target.remoteJid || chat,
+        id: target.id,
+        participant: cached?.sender || undefined
+      }, node);
+      if (!refreshed) throw new Error("media retry not possible");
+      const stream = await downloadContentFromMessage(node, kind === "sticker" ? "sticker" : kind);
+      const chunks = [];
+      for await (const chunk of stream) chunks.push(chunk);
+      buffer = Buffer.concat(chunks);
+    }
     if (!buffer.length) throw new Error("empty media");
 
     if (kind === "image") {
@@ -361,7 +378,7 @@ async function handleReactionSave(deps, sock, msg) {
     try {
       const ownerJid = String(appConfig.ownerNumbers[0] || "").replace(/\D/g, "");
       if (owner && ownerJid) {
-        await sock.sendMessage(ownerJid + "@s.whatsapp.net", { text: "That view-once could not be pulled back — it may have expired." });
+        await sock.sendMessage(ownerJid + "@s.whatsapp.net", { text: "That view-once could not be pulled back — WhatsApp refused to re-serve the media, so it is likely too old now. Ask the sender to send it again and react fast." });
       }
     } catch { /* never break message processing */ }
     return true; // consumed: a known target that failed must not fall through
