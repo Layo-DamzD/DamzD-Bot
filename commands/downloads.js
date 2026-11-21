@@ -91,7 +91,10 @@ async function sendSong(ctx, query) {
   // YouTube via NABEES comes next — a real YouTube search and convert, the
   // most reliable full-track source there is. It is ALWAYS on: the free
   // NABEES key works, a personal NABEES_API_KEY only raises the quota. A
-  // missing key must never switch the service off again.
+  // missing key must never switch the service off again. When even the
+  // rescue route refuses, the final error says so plainly — the shared key's
+  // daily quota is the usual reason, and "try again soon" is honest there.
+  let rescueRefused = false;
   try {
     const found = await searchYouTubeNabees(query);
     const audio = await resolveYouTubeAudioNabees(found.url);
@@ -101,6 +104,7 @@ async function sendSong(ctx, query) {
     await ctx.typing(800);
     return await ctx.send({ audio: buffer, mimetype: "audio/mpeg", fileName: cleanTitle(audio.title || found.title) + ".mp3", ptt: false });
   } catch {
+    rescueRefused = true;
     /* keep trying */
   }
   // Audius: the artist's own full uploads, up to 320 kbps. The gate is the
@@ -127,7 +131,12 @@ async function sendSong(ctx, query) {
   } catch {
     /* keep trying */
   }
-  throw new Error("No clean copy of *" + query + "* right now — every source is refusing that one. Try again soon.");
+  throw new Error(
+    "No clean copy of *" + query + "* right now — every source is refusing that one. " +
+    (rescueRefused
+      ? "The YouTube rescue route is busy today — it usually frees up within a day, so try again soon."
+      : "Try again soon.")
+  );
 }
 
 export default [
