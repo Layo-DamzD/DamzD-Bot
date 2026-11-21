@@ -825,13 +825,32 @@ export class DamzDBot {
         if (ownNumber && (!this.introSentAt || nowMs - this.introSentAt >= 60000)) {
           this.introSentAt = nowMs;
           // One message: the picture with the greeting as its caption — the
-          // split text-then-image send read like two different bots.
+          // split text-then-image send read like two different bots. The
+          // picture must never hold the note hostage, and neither may a
+          // scoping slip: v1.4.32 shipped this block referencing an ownJid
+          // that did not exist in this scope, so every greeting since has
+          // died in a swallowed ReferenceError and the owner simply stopped
+          // hearing the bot come online. The target is now computed here,
+          // the picture races an 8s timer with a text-only fallback, the
+          // send retries once, and every outcome lands in the service logs.
           const note = connectNote(appConfig);
-          botImageMedia(appConfig).then(picture => {
+          const ownChatJid = ownNumber + "@s.whatsapp.net";
+          const sendNote = async () => {
+            const picture = await Promise.race([
+              botImageMedia(appConfig),
+              new Promise(resolve => setTimeout(() => resolve(null), 8000))
+            ]);
             return picture
-              ? sock.sendMessage(ownJid, { ...picture, caption: note })
-              : sock.sendMessage(ownJid, { text: note });
-          }).catch(() => {});
+              ? sock.sendMessage(ownChatJid, { ...picture, caption: note })
+              : sock.sendMessage(ownChatJid, { text: note });
+          };
+          sendNote()
+            .then(() => console.log("[" + appConfig.name + "] connect note delivered to the owner's chat"))
+            .catch(() => sleep(2500).then(() => sendNote())
+              .then(() => console.log("[" + appConfig.name + "] connect note delivered on retry"))
+              .catch(error => console.error("[" + appConfig.name + "] connect note failed twice:", error?.message || error)));
+        } else if (ownNumber) {
+          console.log("[" + appConfig.name + "] connect note skipped (cooldown)");
         }
       } else if (connection === "close") {
         this.connected = false;
