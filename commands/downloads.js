@@ -41,12 +41,13 @@ async function viaAio(ctx, label) {
 
 // Shared song pipeline, in order of quality:
 // 1. JioSaavn when the official artist is verified — the real track, up to 320kbps.
-// 2. JioSaavn without identification (regional tracks Apple does not list) —
-//    the library's best match is very likely the real recording.
-// 3. Real YouTube audio via the keyless public route, then NABEES conversion
-//    when the owner's free key is configured.
-// 4. Honest last resort: Apple's official 30-second preview — never a cover
-//    pretending to be the song.
+// 2. YouTube via NABEES (always on; the free key works, a personal key only
+//    raises quota) — a real YouTube search and convert.
+// 3. Audius: the artist's own full uploads, up to 320 kbps.
+// 4. Keyless YouTube audio as the final rescue.
+// The flow stays silent until bytes are in hand: one "Song found" line, then
+// the audio. No search chatter, no preview fallback — a 30-second preview is
+// not the song, and pretending otherwise is exactly what must never ship.
 async function sendAudioBuffer(ctx, song) {
   const name = song.artist ? song.artist + " - " + song.title : song.title;
   await ctx.send({ audio: song.buffer, mimetype: "audio/mp4", fileName: cleanTitle(name) + ".m4a", ptt: false });
@@ -56,58 +57,41 @@ async function sendAudioUrl(ctx, url, title) {
   await ctx.send({ audio: { url }, mimetype: "audio/mpeg", fileName: cleanTitle(title) + ".mp3", ptt: false });
 }
 
-// Turns a raw duration — seconds from the music library or a "3:45" string
-// from YouTube — into a plain minutes count for the found card.
-function durationMinutes(value) {
-  if (typeof value === "number" && isFinite(value) && value > 0) {
-    return Math.max(1, Math.round(value / 60));
-  }
-  const match = String(value || "").match(/^(\d+):(\d{1,2})/);
-  if (match) return Math.max(1, Math.round(Number(match[1]) + Number(match[2]) / 60));
-  return null;
-}
-
-// The found card: what matched (title, artist when known), the rough length,
-// and the honest "download in progress" line before the bytes move.
+// One line, nothing else: what matched. The audio follows immediately.
 async function announceFound(ctx, song) {
-  const minutes = durationMinutes(song.duration);
-  const lines = ["✅ Found it: " + (song.artist ? song.artist + " — " : "") + song.title];
-  if (minutes) lines.push("⏱️ About " + minutes + " minute" + (minutes === 1 ? "" : "s") + " long.");
-  lines.push("⬇️ Download in progress — sending the audio in a moment…");
-  await ctx.reply(lines.join("\n"));
+  const name = song.artist ? song.artist + " — " + song.title : song.title;
+  await ctx.reply("✅ Song found: " + name);
 }
 
 async function sendSong(ctx, query) {
   const { searchSong, downloadSong } = await import("../src/saavn.js");
   const { audiusFullTrack } = await import("../src/audius.js");
   const { identifyTrack, fetchBuffer, searchQuality } = await import("../src/apis.js");
-  await ctx.reply("🔍 Searching the music libraries for *" + query + "* …");
-  // One identification up front, shared by every stage — the preview fallback
-  // no longer needs a second call to Apple.
+  // Silent until bytes are in hand — no "searching" filler, no step-by-step
+  // narration. The first thing the chat sees is the found line, then audio.
   const identified = await identifyTrack(query).catch(() => null);
   let song = null;
   try {
-    song = await searchSong(query, identified); // metadata first — bytes only after the found card
+    song = await searchSong(query, identified); // metadata first — bytes only after the found line
   } catch {
     song = null;
   }
   if (song && (song.artistVerified || !song.expectedArtist) && searchQuality(query, song) === "strong") {
-    await announceFound(ctx, song);
     try {
       const full = await downloadSong(query, song);
+      await announceFound(ctx, song);
       await ctx.typing(800);
       return sendAudioBuffer(ctx, full);
     } catch {
-      /* the library copy failed to transfer — say so, then keep going */
-      await ctx.reply("That copy would not transfer — trying YouTube next…").catch(() => {});
+      /* the library copy failed to transfer — move on quietly */
     }
   }
   // A fuzzy match for a mistyped name is not a confirmation: a weak match
-  // moves on quietly instead of announcing the wrong song as "Found it".
-  // YouTube via NABEES comes first among the fallbacks — a real YouTube
-  // search and convert, the most reliable full-track source there is. It is
-  // ALWAYS on: the free NABEES key works, a personal NABEES_API_KEY only
-  // raises the quota. A missing key must never switch the service off again.
+  // moves on quietly instead of announcing the wrong song as found.
+  // YouTube via NABEES comes next — a real YouTube search and convert, the
+  // most reliable full-track source there is. It is ALWAYS on: the free
+  // NABEES key works, a personal NABEES_API_KEY only raises the quota. A
+  // missing key must never switch the service off again.
   try {
     const found = await searchYouTubeNabees(query);
     const audio = await resolveYouTubeAudioNabees(found.url);
@@ -143,30 +127,7 @@ async function sendSong(ctx, query) {
   } catch {
     /* keep trying */
   }
-  if (identified?.preview) {
-    // The preview is downloaded and checked BEFORE it is offered: a bare URL
-    // send on a bad host is exactly how that 3-second wreck got delivered.
-    // Under 150KB is a broken transfer — silence beats junk.
-    let previewBuffer = null;
-    try {
-      previewBuffer = await fetchBuffer(identified.preview, { timeoutMs: 45000, label: "preview" });
-    } catch { previewBuffer = null; }
-    if (previewBuffer && previewBuffer.length >= 150 * 1024) {
-      await ctx.reply(
-        "The full-track services are refusing me right now, so here is the official preview of \"" +
-        identified.track + "\" by " + identified.artist + " instead — try again later for the whole song."
-      );
-      return await ctx.send({
-        audio: previewBuffer,
-        mimetype: "audio/mpeg",
-        fileName: cleanTitle(identified.artist + " - " + identified.track + " (preview)") + ".mp3",
-        ptt: false
-      });
-    }
-  }
-  throw new Error(
-    "I could not get a clean copy of that song — try the exact title, and if it still refuses, every source is refusing that one right now"
-  );
+  throw new Error("No clean copy of *" + query + "* right now — every source is refusing that one. Try again soon.");
 }
 
 export default [

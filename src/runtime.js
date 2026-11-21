@@ -790,10 +790,23 @@ export class DamzDBot {
     });
 
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
-      if (type !== "notify") return;
+      // "notify" = live traffic. "append" = history WhatsApp replays on
+      // reconnect — messages that arrived while the bot was offline. Those
+      // replays used to be dropped outright, so the view-once stash never
+      // learned them and a later reaction said "I never received that
+      // message". The replay must fill the passive caches (view-once stash,
+      // anti-delete snapshot) but never speak: no replies, no commands, no
+      // side effects.
+      const live = type === "notify";
+      if (!live && type !== "append") return;
       const softPaused = this.store.get("pausedOn", false);
       for (const msg of messages) {
         try {
+          if (!live) {
+            stashViewOnce(msg);
+            await recordActivity(sock, msg);
+            continue;
+          }
           if (softPaused) {
             // While paused: keep the statistics alive silently (no reactions,
             // no auto-typing, no anti-delete pings) and let processMessage's
