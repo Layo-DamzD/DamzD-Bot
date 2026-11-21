@@ -83,7 +83,7 @@ async function quotedMedia(ctx, { allowDocument = true } = {}) {
   const quoted = info?.quotedMessage;
   if (!quoted) throw new Error("reply to the message with the media");
   const { unwrapMessage } = await import("../src/utils.js");
-  const { findCachedViewOnce } = await import("../src/viewonce.js");
+  const { findCachedViewOnce, readCachedMedia } = await import("../src/viewonce.js");
   const inner = unwrapMessage(quoted);
   const kinds = [
     ["imageMessage", "image"],
@@ -105,6 +105,8 @@ async function quotedMedia(ctx, { allowDocument = true } = {}) {
       const { refreshMediaLocation } = await import("../src/utils.js");
       const cached = await findCachedViewOnce(ctx.jid, info?.stanzaId) || await cachedFromSnapshot(info?.stanzaId);
       if (cached) {
+        const captured = readCachedMedia(cached);
+        if (captured) return { buffer: captured, kind: cached.kind, node: cached.node };
         try {
           return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
         } catch {

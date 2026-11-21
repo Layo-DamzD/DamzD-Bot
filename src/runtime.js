@@ -23,7 +23,7 @@ import { registerCallHook, runSideEffects, recordActivity } from "./hooks.js";
 import { HARD_PAUSED, PAUSE_NOTE } from "./flags.js";
 import { resolveJidNumber } from "./lidmap.js";
 import { getCached } from "./cache.js";
-import { stashViewOnce, findCachedViewOnce, findViewOnceCarrier } from "./viewonce.js";
+import { stashViewOnce, findCachedViewOnce, findViewOnceCarrier, readCachedMedia } from "./viewonce.js";
 import { connectNote } from "../commands/general.js";
 
 const MAX_PROCESSED_IDS = 2000;
@@ -387,8 +387,12 @@ async function handleReactionSave(deps, sock, msg) {
       for await (const chunk of stream) chunks.push(chunk);
       return Buffer.concat(chunks);
     };
-    let buffer;
-    try {
+    let buffer = readCachedMedia(cached);
+    if (buffer) {
+      // Captured on arrival — the bytes never depend on WhatsApp's
+      // one-serving policy or an expired CDN URL, so an opened view-once
+      // still recovers perfectly.
+    } else try {
       buffer = await pull();
     } catch {
       // Stripped or expired media location — the media-retry protocol is the
