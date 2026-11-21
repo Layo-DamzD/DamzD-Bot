@@ -109,15 +109,31 @@ async function quotedMedia(ctx, { allowDocument = true } = {}) {
           return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
         } catch {
           // Even the stashed arrival lost its media location — the media-retry
-          // protocol is the last chance for a fresh one.
+          // protocol is the last chance for a fresh one. The sender's device
+          // can answer the retry late, so one more refresh-and-download pass
+          // runs before the failure stands.
           await refreshMediaLocation(ctx.sock, { remoteJid: ctx.jid, id: info?.stanzaId, participant: info?.participant }, cached.node);
-          return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
+          try {
+            return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
+          } catch {
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            await refreshMediaLocation(ctx.sock, { remoteJid: ctx.jid, id: info?.stanzaId, participant: info?.participant }, cached.node);
+            return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
+          }
         }
       }
       // No cached copy at all: the quote itself still carries the mediaKey,
       // which is exactly what the retry protocol needs to re-serve the media.
       const refreshed = await refreshMediaLocation(ctx.sock, { remoteJid: info?.remoteJid || ctx.jid, id: info?.stanzaId, participant: info?.participant }, node);
-      if (refreshed) return { buffer: await downloadNode(node, kind), kind, node };
+      if (refreshed) {
+        try {
+          return { buffer: await downloadNode(node, kind), kind, node };
+        } catch {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          await refreshMediaLocation(ctx.sock, { remoteJid: info?.remoteJid || ctx.jid, id: info?.stanzaId, participant: info?.participant }, node);
+          return { buffer: await downloadNode(node, kind), kind, node };
+        }
+      }
       throw error;
     }
   }

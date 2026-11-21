@@ -27,6 +27,47 @@ import { stashViewOnce, findCachedViewOnce, findViewOnceCarrier } from "./viewon
 import { connectNote } from "../commands/general.js";
 
 const MAX_PROCESSED_IDS = 2000;
+
+// Restarts wipe the in-memory processed set, and WhatsApp replays messages
+// that were never acknowledged — after a redeploy the same command could run
+// twice (the double "GGs!" and the double song failure line). A small
+// store-backed ring of recent message ids, saved on a timer, blocks those
+// replays across restarts without writing the store on every single message.
+const RECENT_ID_TTL_MS = 30 * 60 * 1000;
+const RECENT_ID_MAX = 1000;
+let recentIds = null;
+let recentIdsStore = null;
+let recentIdsTimer = null;
+
+function loadRecentIds(store) {
+  if (recentIds && recentIdsStore === store) return;
+  recentIdsStore = store;
+  recentIds = new Map(Object.entries(store.get("recentMsgIds", {})));
+}
+
+function sawRecentId(store, id) {
+  loadRecentIds(store);
+  const at = recentIds.get(id);
+  return Boolean(at && Date.now() - at < RECENT_ID_TTL_MS);
+}
+
+function noteRecentId(store, id) {
+  loadRecentIds(store);
+  const now = Date.now();
+  recentIds.set(id, now);
+  for (const [key, at] of recentIds) if (now - at > RECENT_ID_TTL_MS) recentIds.delete(key);
+  while (recentIds.size > RECENT_ID_MAX) recentIds.delete(recentIds.keys().next().value);
+}
+
+function scheduleRecentIdSave(store) {
+  if (recentIdsTimer) return;
+  recentIdsTimer = setInterval(() => {
+    try {
+      if (recentIds && recentIds.size) store.set("recentMsgIds", Object.fromEntries(recentIds));
+    } catch { /* the next tick retries */ }
+  }, 45000);
+  if (recentIdsTimer.unref) recentIdsTimer.unref();
+}
 const AI_COOLDOWN_MS = 2500;
 
 // Bare words — command words that read like requests work with NO dot at all.
@@ -325,7 +366,8 @@ async function handleReactionSave(deps, sock, msg) {
           sock.sendMessage(own + "@s.whatsapp.net", {
             text: "👀 Reaction noted, but I never received that message, so there is nothing to pull back.\n" +
               "I can only recover media I actually saw arrive — it was likely sent while I was offline or before the last restart.\n" +
-              "Ask the sender to send it again, then react or reply Ggs to it."
+              "Ask the sender to send it again, then react or reply Ggs to it.\n" +
+              "(id " + target.id + " — it never reached me, so there was nothing to retry with.)"
           }).catch(() => {});
         }
       }
@@ -339,26 +381,38 @@ async function handleReactionSave(deps, sock, msg) {
     if (!owner && (appConfig.accessMode !== "public" || banned.includes(senderNumber))) return false;
 
     if (!["image", "video", "audio", "sticker"].includes(kind)) return false;
-    let buffer;
-    try {
+    const pull = async () => {
       const stream = await downloadContentFromMessage(node, kind === "sticker" ? "sticker" : kind);
       const chunks = [];
       for await (const chunk of stream) chunks.push(chunk);
-      buffer = Buffer.concat(chunks);
+      return Buffer.concat(chunks);
+    };
+    let buffer;
+    try {
+      buffer = await pull();
     } catch {
       // Stripped or expired media location — the media-retry protocol is the
       // one chance left: ask WhatsApp to re-serve fresh media info for the
-      // original message, then pull the same node again.
+      // original message, then pull the same node again. The sender's device
+      // can answer the retry late, so one more refresh-and-download pass
+      // runs before the failure stands.
       const refreshed = await refreshMediaLocation(sock, {
         remoteJid: target.remoteJid || chat,
         id: target.id,
         participant: cached?.sender || undefined
       }, node);
       if (!refreshed) throw new Error("media retry not possible");
-      const stream = await downloadContentFromMessage(node, kind === "sticker" ? "sticker" : kind);
-      const chunks = [];
-      for await (const chunk of stream) chunks.push(chunk);
-      buffer = Buffer.concat(chunks);
+      try {
+        buffer = await pull();
+      } catch {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        await refreshMediaLocation(sock, {
+          remoteJid: target.remoteJid || chat,
+          id: target.id,
+          participant: cached?.sender || undefined
+        }, node);
+        buffer = await pull();
+      }
     }
     if (!buffer.length) throw new Error("empty media");
 
@@ -397,6 +451,14 @@ export async function processMessage(deps, sock, msg) {
   const id = String(msg.key.id || "");
   if (id) {
     if (deps.processed.has(id)) return;
+    // Replay guard across restarts: an id the store still remembers (last
+    // 30 minutes) was already handled by a previous run — never run it again.
+    if (sawRecentId(deps.store, id)) {
+      deps.processed.add(id);
+      return;
+    }
+    noteRecentId(deps.store, id);
+    scheduleRecentIdSave(deps.store);
     deps.processed.add(id);
     if (deps.processed.size > MAX_PROCESSED_IDS) {
       const oldest = deps.processed.values().next().value;
@@ -556,7 +618,7 @@ export class DamzDBot {
     this.pairingCodeAt = null;
     this.startedAt = Date.now();
     this.stopped = false;
-    this.introSent = false;
+    this.introSentAt = null;   // last connect-note time — the note repeats on every reconnect, throttled to one a minute
     this.pairingWasFresh = false;
     this.pairingTarget = null;   // the number the current code is for (manual input can change it)
     this.qrString = null;
@@ -726,22 +788,22 @@ export class DamzDBot {
         const ownNumber = numberFromJid(sock.user?.id || "");
         if (ownNumber) addRuntimeOwner(ownNumber);
         console.log("[" + appConfig.name + "] connected as " + (sock.user?.id || "unknown"));
-        // First stable connection of this run: the bot's picture goes first,
-        // then the connect note as ONE unbroken message, straight to the
-        // owner's own chat. Socket recycles keep the same session object, so
-        // reconnects never spam this — only a real start announces.
-        if (!this.introSent) {
-          this.introSent = true;
-          if (ownNumber) {
-            // One message: the picture with the greeting as its caption — the
-            // split text-then-image send read like two different bots.
-            const note = connectNote(appConfig);
-            botImageMedia(appConfig).then(picture => {
-              return picture
-                ? sock.sendMessage(ownJid, { ...picture, caption: note })
-                : sock.sendMessage(ownJid, { text: note });
-            }).catch(() => {});
-          }
+        // Every stable connection announces: the picture goes first, then the
+        // connect note as ONE unbroken message, straight to the owner's own
+        // chat — on every reconnect, not just the first start. A short
+        // cooldown keeps a rapid socket-recycle loop from flooding the chat:
+        // at most one note a minute, and the first connect always announces.
+        const nowMs = Date.now();
+        if (ownNumber && (!this.introSentAt || nowMs - this.introSentAt >= 60000)) {
+          this.introSentAt = nowMs;
+          // One message: the picture with the greeting as its caption — the
+          // split text-then-image send read like two different bots.
+          const note = connectNote(appConfig);
+          botImageMedia(appConfig).then(picture => {
+            return picture
+              ? sock.sendMessage(ownJid, { ...picture, caption: note })
+              : sock.sendMessage(ownJid, { text: note });
+          }).catch(() => {});
         }
       } else if (connection === "close") {
         this.connected = false;

@@ -5,28 +5,42 @@
 import { fetchJson } from "./utils.js";
 
 export async function fetchBuffer(url, { timeoutMs = 90000, label = "service", headers } = {}) {
-  let response;
-  try {
-    response = await fetch(url, {
-      // Several download hosts refuse UA-less clients outright — always look
-      // like a browser unless the caller sent explicit headers.
-      headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36", ...(headers || {}) },
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-  } catch (error) {
-    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
-      throw new Error(label + " took too long to respond. Try again in a moment.");
+  // Some download hosts accept one client shape and refuse another: datacenter
+  // IPs get a different treatment than desktop browsers, and a couple reject
+  // the desktop UA outright. Two attempts — desktop profile, then Android
+  // profile — before the failure stands.
+  const profiles = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
+  ];
+  let lastError;
+  for (const profile of profiles) {
+    let response;
+    try {
+      response = await fetch(url, {
+        // Several download hosts refuse UA-less clients outright — always look
+        // like a browser unless the caller sent explicit headers.
+        headers: { "user-agent": profile, ...(headers || {}) },
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+    } catch (error) {
+      lastError = error?.name === "TimeoutError" || error?.name === "AbortError"
+        ? new Error(label + " took too long to respond. Try again in a moment.")
+        : new Error("Could not reach the " + label + ". Please try again later.");
+      continue;
     }
-    throw new Error("Could not reach the " + label + ". Please try again later.");
+    if (!response.ok) {
+      lastError = new Error("The " + label + " answered with an error (" + response.status + "). Try again shortly.");
+      continue;
+    }
+    const raw = await response.arrayBuffer();
+    if (!raw || raw.byteLength < 100) {
+      lastError = new Error("The " + label + " returned an empty file. Try again in a moment.");
+      continue;
+    }
+    return Buffer.from(raw);
   }
-  if (!response.ok) {
-    throw new Error("The " + label + " answered with an error (" + response.status + "). Try again shortly.");
-  }
-  const raw = await response.arrayBuffer();
-  if (!raw || raw.byteLength < 100) {
-    throw new Error("The " + label + " returned an empty file. Try again in a moment.");
-  }
-  return Buffer.from(raw);
+  throw lastError;
 }
 
 export async function fetchText(url, { timeoutMs = 60000, label = "service", headers } = {}) {

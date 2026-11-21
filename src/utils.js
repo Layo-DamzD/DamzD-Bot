@@ -189,16 +189,27 @@ export async function refreshMediaLocation(sock, key, node) {
   try {
     const nodeKey = MEDIA_NODE_KEYS.find(k => node?.[k]);
     if (!nodeKey || !key?.id || !node.mediaKey || typeof sock?.updateMediaMessage !== "function") return false;
-    await sock.updateMediaMessage({
-      key: {
-        remoteJid: String(key.remoteJid || ""),
-        id: String(key.id),
-        fromMe: Boolean(key.fromMe),
-        ...(key.participant ? { participant: String(key.participant) } : {})
-      },
-      message: { [nodeKey]: node }
-    });
-    return true;
+    // The media-retry asks WhatsApp AND the sender's device to re-serve fresh
+    // media info. The sender's phone can be slow to answer the first request,
+    // so a refused or timed-out attempt is retried once after a short pause
+    // before the caller's original error stands.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await sock.updateMediaMessage({
+          key: {
+            remoteJid: String(key.remoteJid || ""),
+            id: String(key.id),
+            fromMe: Boolean(key.fromMe),
+            ...(key.participant ? { participant: String(key.participant) } : {})
+          },
+          message: { [nodeKey]: node }
+        });
+        return true;
+      } catch (error) {
+        if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+    }
+    return false;
   } catch {
     return false; // the caller's original error stands
   }
