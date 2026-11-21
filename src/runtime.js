@@ -23,7 +23,7 @@ import { registerCallHook, runSideEffects, recordActivity } from "./hooks.js";
 import { HARD_PAUSED, PAUSE_NOTE } from "./flags.js";
 import { resolveJidNumber } from "./lidmap.js";
 import { getCached } from "./cache.js";
-import { stashViewOnce, findCachedViewOnce, findViewOnceCarrier, readCachedMedia } from "./viewonce.js";
+import { stashViewOnce, findCachedViewOnce, findViewOnceCarrier, readCachedMedia, viewOnceCacheSize } from "./viewonce.js";
 import { connectNote } from "../commands/general.js";
 
 const MAX_PROCESSED_IDS = 2000;
@@ -323,6 +323,24 @@ async function handleLink(ctx, text) {
   }
 }
 
+// The instant a view-once is stashed, the owner gets one quiet line in their
+// own chat: the feature is now observable. The note fires only for messages
+// that genuinely reached this run (after the replay guard), so a duplicate
+// delivery never double-notes.
+function noteViewOnceCapture(sock, msg) {
+  try {
+    const own = numberFromJid(String(sock?.user?.id || ""));
+    if (!own) return;
+    const chat = String(msg.key.remoteJid || "");
+    const who = chat.endsWith("@g.us")
+      ? "a group chat"
+      : "+" + (numberFromJid(chat) || "unknown chat");
+    sock.sendMessage(own + "@s.whatsapp.net", {
+      text: "🔒 View-once remembered from " + who + " the moment it arrived — the bytes are being captured now. React ❤️ or reply Ggs to that message to save it, even hours later or after it has been viewed."
+    }).catch(() => {});
+  } catch { /* a note must never break processing */ }
+}
+
 // Reaction-save: any reaction to a remembered view-once pulls that media
 // straight back into the same chat — no reply needed, the reaction IS the
 // trigger. Access follows the command gate: self mode answers the owner
@@ -367,7 +385,7 @@ async function handleReactionSave(deps, sock, msg) {
             text: "👀 Reaction noted, but I never received that message, so there is nothing to pull back.\n" +
               "I can only recover media I actually saw arrive — it was likely sent while I was offline or before the last restart.\n" +
               "Ask the sender to send it again, then react or reply Ggs to it.\n" +
-              "(id " + target.id + " — it never reached me, so there was nothing to retry with.)"
+              "(id " + target.id + " — it never reached me. View-once messages remembered since boot: " + viewOnceCacheSize() + ".)"
           }).catch(() => {});
         }
       }
@@ -450,7 +468,7 @@ export async function processMessage(deps, sock, msg) {
   // Remember every view-once the bot can legitimately see (its own chats and
   // the groups it is in) — the recovery command matches quoted copies back to
   // these by stanza id, because quotes arrive with the media metadata stripped.
-  stashViewOnce(msg);
+  const stashed = stashViewOnce(msg);
 
   const id = String(msg.key.id || "");
   if (id) {
@@ -469,6 +487,12 @@ export async function processMessage(deps, sock, msg) {
       deps.processed.delete(oldest);
     }
   }
+
+  // Observability the recovery feature was missing: the instant a view-once
+  // is remembered, the owner hears about it in their own chat. If this note
+  // never appears for a message, the bot never saw it — and no reaction can
+  // ever recover what never arrived.
+  if (stashed) noteViewOnceCapture(sock, msg);
 
   // Reaction-save first: reactions carry no text, so they would otherwise
   // die silently at the text gate below.

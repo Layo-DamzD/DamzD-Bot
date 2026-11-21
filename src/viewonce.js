@@ -146,7 +146,7 @@ function schedulePrefetch(key, entry) {
   setTimeout(() => {
     prefetching.delete(key);
     prefetchMedia(key, entry);
-  }, 2500);
+  }, 1200);
 }
 
 async function prefetchMedia(key, entry) {

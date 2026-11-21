@@ -762,7 +762,7 @@ await check("connectNote greets the owner in the menu's look", async () => {
   const { connectNote } = await import("../commands/general.js");
   const note = connectNote({ name: "DamzD", prefix: "." });
   assert.match(note, /connected and online/);
-  assert.match(note, /1\.4\.35/);
+  assert.match(note, /1\.4\.36/);
   assert.match(note, /PREFIX|𝗣𝗥𝗘𝗙𝗜𝗫/);
   assert.match(note, /OWNER|𝗢𝗪𝗡𝗘𝗥/);
   assert.match(note, /MODE|𝗠𝗢𝗗𝗘/);
@@ -864,7 +864,9 @@ await check("reaction-save: reacting to a view-once pulls it back — access-gat
   };
   sent.length = 0;
   await processMessage(deps, nonOwnerSock, viewOnce);
-  assert.equal(sent.length, 0, "the view-once arrives silently (stash only)");
+  assert.equal(sent.length, 1, "the arrival now notes the capture exactly once");
+  assert.match(firstText(), /View-once remembered/, "the capture note makes the stash observable");
+  assert.equal(sent[0].jid, "2348000000002@s.whatsapp.net", "the capture note goes to the bot's own account chat only");
 
   const react = (targetId, fromMe) => ({
     key: { remoteJid: chat, fromMe: Boolean(fromMe), id: "REACT-" + Math.random().toString(36).slice(2) },
@@ -908,7 +910,8 @@ await check("view-once stash catches ephemeral-wrapped view-onces", async () => 
       url: "https://mmg.whatsapp.net/v/t62.7118-24/eph.jpg", directPath: "/mms/image/eph", mimetype: "image/jpeg"
     } } } } } }
   });
-  assert.equal(sent.length, 0, "arrives silently");
+  assert.equal(sent.length, 1, "the ephemeral view-once also notes its capture");
+  assert.match(firstText(), /View-once remembered/, "the stash announces itself");
   assert.ok(findCachedViewOnce(chat, "VV-EPH-1"), "the stash found it UNDER the ephemeral wrapper");
 });
 
