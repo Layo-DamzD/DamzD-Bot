@@ -250,12 +250,31 @@ export async function searchYouTubeAudio(query) {
 
 const NABEES_API = "https://apis.nabeestech.com/api/v1";
 
+// The base URL above is already built in — NABEES_API_KEY is the KEY only.
+// A URL pasted into that slot (an easy mix-up, since the base URL is the
+// other half of the pairing) would poison every request with an invalid
+// key, so any http(s) value is ignored with a one-time warning and the
+// shared public key takes over.
+let nabeesKeyWarned = false;
+
+function nabeesKey() {
+  const value = String(process.env.NABEES_API_KEY || "").trim();
+  if (!value || /^https?:\/\//i.test(value)) {
+    if (value && !nabeesKeyWarned) {
+      nabeesKeyWarned = true;
+      console.warn("[NABEES] NABEES_API_KEY looks like a URL — the base URL is already built in, so the key slot expects a key string. Using the shared public key instead.");
+    }
+    return "nabeestech";
+  }
+  return value;
+}
+
 // NABEES free tier — the public key "nabeestech" (~100 requests/day) works
 // out of the box; a personal NABEES_API_KEY from apis.nabeestech.com raises
 // the quota. Either way the YouTube rescue path is ALWAYS on — a missing
 // dashboard key must never switch the whole service off again.
 export async function searchYouTubeNabees(query) {
-  const key = String(process.env.NABEES_API_KEY || "nabeestech").trim() || "nabeestech";
+  const key = nabeesKey();
   const payload = await fetchJson(
     NABEES_API + "/search/youtube?apikey=" + encodeURIComponent(key) +
     "&q=" + encodeURIComponent(String(query || "").slice(0, 200)),
@@ -272,7 +291,7 @@ export async function searchYouTubeNabees(query) {
 }
 
 export async function resolveYouTubeAudioNabees(videoUrl) {
-  const key = String(process.env.NABEES_API_KEY || "nabeestech").trim() || "nabeestech";
+  const key = nabeesKey();
   const query = "apikey=" + encodeURIComponent(key) + "&url=" + encodeURIComponent(videoUrl);
   const endpoints = ["/download/youtube-mp3", "/download/youtube", "/download/youtube-v2"];
   let lastError = new Error("the YouTube music service refused that request");

@@ -762,7 +762,7 @@ await check("connectNote greets the owner in the menu's look", async () => {
   const { connectNote } = await import("../commands/general.js");
   const note = connectNote({ name: "DamzD", prefix: "." });
   assert.match(note, /connected and online/);
-  assert.match(note, /1\.4\.33/);
+  assert.match(note, /1\.4\.34/);
   assert.match(note, /PREFIX|𝗣𝗥𝗘𝗙𝗜𝗫/);
   assert.match(note, /OWNER|𝗢𝗪𝗡𝗘𝗥/);
   assert.match(note, /MODE|𝗠𝗢𝗗𝗘/);
