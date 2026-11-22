@@ -136,6 +136,16 @@ async function quotedMedia(ctx, { allowDocument = true } = {}) {
           return { buffer: await downloadNode(node, kind), kind, node };
         }
       }
+      // The retry could not refresh the quote either. If the bot never
+      // received this message at all (no stash, no snapshot), relaying
+      // Baileys' raw "No valid media URL or directPath" error is baffling —
+      // the reaction path already explains this wall honestly, so Ggs must
+      // match it. The owner gets the same plain-language reason and the same
+      // fix: resend while online, watch for the lock note, then react/Ggs.
+      const { getCached } = await import("../src/cache.js");
+      if (!getCached(info?.stanzaId)) {
+        throw new Error("that message never reached me — it was sent while I was offline, restarting or re-pairing, and WhatsApp does not re-deliver missed media. Ask the sender to resend it now; watch for my 🔒 note in your own chat, then react or reply Ggs.");
+      }
       throw error;
     }
   }
@@ -180,7 +190,11 @@ export default [
       }
       const target = ownNumberJid(ctx);
       if (!target) throw new Error("I could not resolve your own chat");
-      const source = ctx.isGroup ? "a group" : "+" + numberFromJid(ctx.jid);
+      // A LID-mode DM renders as a 12-digit privacy id, not a phone number —
+      // never pretend it is one (the old "+" + digits produced nonsense like
+      // +251814620463268). Say "a contact" instead.
+      const jid = String(ctx.jid || "");
+      const source = ctx.isGroup ? "a group" : (jid.endsWith("@lid") ? "a contact" : "+" + numberFromJid(jid));
       // House rule: nothing — no reply, no reaction, no typing indicator —
       // is ever sent back to the chat the media came from. The person who
       // sent the view-once will never know it was recovered. Everything
