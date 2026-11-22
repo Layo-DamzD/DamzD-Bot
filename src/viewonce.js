@@ -313,3 +313,23 @@ export function viewOnceCacheSize() {
   prune();
   return stash.size;
 }
+
+// The last few stanza ids the bot remembers (most recent first, tail only) —
+// shown in the "never reached me" note so the owner can compare the id they
+// just reacted to against what actually landed. A near-miss (one char off, a
+// prefix difference) points at an id-format mismatch; an absent id confirms
+// the message never arrived.
+export function recentStashIds(limit = 3) {
+  try {
+    prune();
+    const entries = [...stash.entries()]
+      .sort((a, b) => (b[1].at || 0) - (a[1].at || 0))
+      .slice(0, limit);
+    return entries.map(([key]) => {
+      const id = String(key.split("|")[1] || "");
+      return id ? id.slice(-10) : "";
+    }).filter(Boolean);
+  } catch {
+    return [];
+  }
+}

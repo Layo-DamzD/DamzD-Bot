@@ -143,8 +143,9 @@ async function quotedMedia(ctx, { allowDocument = true } = {}) {
       // match it. The owner gets the same plain-language reason and the same
       // fix: resend while online, watch for the lock note, then react/Ggs.
       const { getCached } = await import("../src/cache.js");
+      const { recentStashIds } = await import("../src/viewonce.js");
       if (!getCached(info?.stanzaId)) {
-        throw new Error("that message never reached me — it was sent while I was offline, restarting or re-pairing, and WhatsApp does not re-deliver missed media. Ask the sender to resend it now; watch for my 🔒 note in your own chat, then react or reply Ggs.");
+        throw new Error("that message never reached me — it was sent while I was offline, restarting or re-pairing, and WhatsApp does not re-deliver missed media. Ask the sender to resend it now; watch for my 🔒 note in your own chat, then react or reply Ggs. (Recent ids remembered: " + (recentStashIds(3).map(x => "…" + x).join("  ") || "none") + ".)");
       }
       throw error;
     }

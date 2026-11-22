@@ -23,7 +23,7 @@ import { registerCallHook, runSideEffects, recordActivity } from "./hooks.js";
 import { HARD_PAUSED, PAUSE_NOTE } from "./flags.js";
 import { resolveJidNumber } from "./lidmap.js";
 import { getCached } from "./cache.js";
-import { stashViewOnce, stashRememberMedia, findCachedViewOnce, findViewOnceCarrier, readCachedMedia, viewOnceCacheSize } from "./viewonce.js";
+import { stashViewOnce, stashRememberMedia, findCachedViewOnce, findViewOnceCarrier, readCachedMedia, viewOnceCacheSize, recentStashIds } from "./viewonce.js";
 import { connectNote } from "../commands/general.js";
 
 const MAX_PROCESSED_IDS = 2000;
@@ -332,11 +332,19 @@ function noteViewOnceCapture(sock, msg) {
     const own = numberFromJid(String(sock?.user?.id || ""));
     if (!own) return;
     const chat = String(msg.key.remoteJid || "");
+    // A LID-mode DM is a 12-digit privacy id, not a phone number — never
+    // dress it up as one. Say "a contact" instead.
     const who = chat.endsWith("@g.us")
       ? "a group chat"
-      : "+" + (numberFromJid(chat) || "unknown chat");
+      : (chat.endsWith("@lid") ? "a contact" : "+" + (numberFromJid(chat) || "unknown chat"));
+    // The tail of the stanza id goes in the note so the owner can match it
+    // against the id in a "never reached me" note — same id = the stash has
+    // it, react/Ggs will recover; no 🔒 note at all = the bot never received
+    // the media.
+    const idTail = String(msg.key?.id || "").slice(-10);
+    const idPart = idTail ? " (id …" + idTail + ")" : "";
     sock.sendMessage(own + "@s.whatsapp.net", {
-      text: "🔒 View-once remembered from " + who + " the moment it arrived — the bytes are being captured now. React ❤️ or reply Ggs to that message to save it, even hours later or after it has been viewed."
+      text: "🔒 View-once remembered from " + who + idPart + " the moment it arrived — the bytes are being captured now. React ❤️ or reply Ggs to that message to save it, even hours later or after it has been viewed."
     }).catch(() => {});
   } catch { /* a note must never break processing */ }
 }
@@ -386,7 +394,7 @@ async function handleReactionSave(deps, sock, msg) {
             text: "👀 Reaction noted, but that message never reached me — there is nothing to pull back.\n" +
               "It was sent while I was offline, restarting or re-pairing: WhatsApp does not re-deliver missed media to a fresh link, so it cannot be recovered, opened or not.\n" +
               "Ask the sender to resend it NOW — watch for my 🔒 note in your own chat — then react or reply Ggs to it.\n" +
-              "(id " + target.id + " — media messages remembered since boot: " + viewOnceCacheSize() + ".)"
+              "(id " + target.id + " — media messages remembered since boot: " + viewOnceCacheSize() + ". Recent ids: " + (recentStashIds(3).map(x => "…" + x).join("  ") || "none") + ".)"
           }).catch(() => {});
         }
       }
@@ -472,7 +480,16 @@ export async function processMessage(deps, sock, msg) {
   // Every other media arrival is remembered too: a reaction is explicit
   // intent, and the stash now catches media in ANY wrapper shape.
   const stashed = stashViewOnce(msg);
-  stashRememberMedia(msg);
+  const remembered = stashRememberMedia(msg);
+  if (stashed || remembered) {
+    // One quiet line per media arrival, so the service logs answer "did the
+    // bot see it?" without ambiguity: the id, the chat, the kind, and whether
+    // it landed as a real view-once or plain media.
+    const tail = String(msg.key?.id || "").slice(-10);
+    try {
+      console.log("[" + appConfig.name + "] media arrived: id=…" + tail + " chat=" + String(msg.key.remoteJid || "").slice(0, 24) + (stashed ? " kind=view-once" : " kind=media"));
+    } catch { /* logging must never break processing */ }
+  }
 
   const id = String(msg.key.id || "");
   if (id) {
