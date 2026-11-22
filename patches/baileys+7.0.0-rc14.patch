@@ -1,0 +1,27 @@
+diff --git a/node_modules/baileys/lib/Socket/messages-recv.js b/node_modules/baileys/lib/Socket/messages-recv.js
+index 9452e3c..c17ae29 100644
+--- a/node_modules/baileys/lib/Socket/messages-recv.js
++++ b/node_modules/baileys/lib/Socket/messages-recv.js
+@@ -1314,9 +1314,20 @@ export const makeMessagesRecvSocket = (config) => {
+                         // Check if this is eligible for placeholder resend (matching WA Web filters).
+                         const unavailableNode = getBinaryNodeChild(node, 'unavailable');
+                         const unavailableType = unavailableNode?.attrs?.type;
++                        // DamzD patch: the fork used to also skip
++                        // view_once_unavailable_fanout here (matching WA Web's
++                        // privacy filter). That left the companion blind to
++                        // view-onces entirely — no upsert, no cache, no
++                        // recovery. This bot's whole purpose is view-once
++                        // recovery, so view-onces are NOT excluded: the
++                        // placeholder resend is requested, the primary phone
++                        // re-serves the full media, and the companion's normal
++                        // message path (messages.upsert -> stash -> lock note)
++                        // fires. The phone still decides whether to comply
++                        // (un-opened view-onces only), so view-once privacy is
++                        // preserved at the source.
+                         if (unavailableType === 'bot_unavailable_fanout' ||
+-                            unavailableType === 'hosted_unavailable_fanout' ||
+-                            unavailableType === 'view_once_unavailable_fanout') {
++                            unavailableType === 'hosted_unavailable_fanout') {
+                             logger.debug({ msgId: msg.key.id, unavailableType }, 'skipping placeholder resend for excluded unavailable type');
+                             acked = true;
+                             return sendMessageAck(node);

@@ -937,6 +937,13 @@ export class DamzDBot {
       // side effects.
       const live = type === "notify";
       if (!live && type !== "append") return;
+      // One line per upsert event so the logs answer "did the bot even see
+      // traffic?" — after the Baileys view-once-resend patch, a re-served
+      // view-once lands here as a normal notify and this line proves it.
+      try {
+        const first = messages?.[0]?.key?.id ? " …" + String(messages[0].key.id).slice(-8) : "";
+        console.log("[" + appConfig.name + "] upsert type=" + type + " count=" + (messages?.length || 0) + first);
+      } catch { /* never break processing */ }
       const softPaused = this.store.get("pausedOn", false);
       for (const msg of messages) {
         try {
