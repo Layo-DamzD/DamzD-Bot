@@ -207,7 +207,11 @@ export default [
         // they stay out of everywhere, because a "could not recover" DM would
         // reveal what the command really does. Only the owner gets the note.
         if (ctx.isOwner) {
-          await ctx.sock.sendMessage(target, { text: "I could not recover that one (from " + source + ") — " + String(error?.message || "it may have expired.") });
+          const missingMedia = /No valid media URL or directPath/i.test(error?.message || "");
+          const detail = missingMedia
+            ? "WhatsApp supplied no downloadable attachment. Ask the sender to share it as a regular photo or video."
+            : String(error?.message || "The attachment is unavailable.");
+          await ctx.sock.sendMessage(target, { text: "I could not recover that one. " + detail });
         }
       }
     }

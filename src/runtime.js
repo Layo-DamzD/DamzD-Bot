@@ -16,15 +16,15 @@ import { resolveCommandInput } from "./loader.js";
 import { askAI, hasAIBrain } from "./ai.js";
 import { downloadContentFromMessage } from "baileys";
 import { detectPlatform, resolveAllInOne, mediaKind, cleanTitle } from "./downloads.js";
-import { messageText, mentionedJids, quotedParticipant, numberFromJid, sleep, botImageMedia, unwrapMessage } from "./utils.js";
+import { messageText, mentionedJids, quotedParticipant, numberFromJid, sleep, unwrapMessage } from "./utils.js";
 import { config as appConfig, isOwnerNumber, addRuntimeOwner } from "./config.js";
 import { WELCOME_ON, GOODBYE_ON, ANTILINK_ON } from "./store.js";
 import { registerCallHook, runSideEffects, recordActivity } from "./hooks.js";
 import { HARD_PAUSED, PAUSE_NOTE } from "./flags.js";
 import { resolveJidNumber } from "./lidmap.js";
 import { getCached } from "./cache.js";
-import { stashViewOnce, findCachedViewOnce, findViewOnceCarrier, readCachedMedia, viewOnceCacheSize } from "./viewonce.js";
-import { connectNote } from "../commands/general.js";
+import { stashViewOnce, findCachedViewOnce, findViewOnceCarrier, readCachedMedia } from "./viewonce.js";
+import { sendConnectionCard } from "./connection-card.js";
 
 const MAX_PROCESSED_IDS = 2000;
 
@@ -382,10 +382,7 @@ async function handleReactionSave(deps, sock, msg) {
         const own = numberFromJid(String(sock?.user?.id || ""));
         if (own) {
           sock.sendMessage(own + "@s.whatsapp.net", {
-            text: "👀 Reaction noted, but I never received that message, so there is nothing to pull back.\n" +
-              "I can only recover media I actually saw arrive — it was likely sent while I was offline or before the last restart.\n" +
-              "Ask the sender to send it again, then react or reply Ggs to it.\n" +
-              "(id " + target.id + " — it never reached me. View-once messages remembered since boot: " + viewOnceCacheSize() + ".)"
+            text: "I only have the reaction. If you need a copy, ask the sender to share the original as a regular photo or video."
           }).catch(() => {});
         }
       }
@@ -771,7 +768,7 @@ export class DamzDBot {
     sock.ev.on("creds.update", saveCreds);
     registerCallHook(sock, this.store);
 
-    sock.ev.on("connection.update", update => {
+    sock.ev.on("connection.update", async update => {
       const { connection, lastDisconnect } = update;
       // Keep the latest QR for the dashboard's scan-to-link fallback — that is
       // the pairing path the patched library's fix was confirmed for.
@@ -816,41 +813,25 @@ export class DamzDBot {
         const ownNumber = numberFromJid(sock.user?.id || "");
         if (ownNumber) addRuntimeOwner(ownNumber);
         console.log("[" + appConfig.name + "] connected as " + (sock.user?.id || "unknown"));
-        // Every stable connection announces: the picture goes first, then the
-        // connect note as ONE unbroken message, straight to the owner's own
-        // chat — on every reconnect, not just the first start. A short
-        // cooldown keeps a rapid socket-recycle loop from flooding the chat:
-        // at most one note a minute, and the first connect always announces.
-        const nowMs = Date.now();
-        if (ownNumber && (!this.introSentAt || nowMs - this.introSentAt >= 60000)) {
-          this.introSentAt = nowMs;
-          // One message: the picture with the greeting as its caption — the
-          // split text-then-image send read like two different bots. The
-          // picture must never hold the note hostage, and neither may a
-          // scoping slip: v1.4.32 shipped this block referencing an ownJid
-          // that did not exist in this scope, so every greeting since has
-          // died in a swallowed ReferenceError and the owner simply stopped
-          // hearing the bot come online. The target is now computed here,
-          // the picture races an 8s timer with a text-only fallback, the
-          // send retries once, and every outcome lands in the service logs.
-          const note = connectNote(appConfig);
-          const ownChatJid = ownNumber + "@s.whatsapp.net";
-          const sendNote = async () => {
-            const picture = await Promise.race([
-              botImageMedia(appConfig),
-              new Promise(resolve => setTimeout(() => resolve(null), 8000))
-            ]);
-            return picture
-              ? sock.sendMessage(ownChatJid, { ...picture, caption: note })
-              : sock.sendMessage(ownChatJid, { text: note });
-          };
-          sendNote()
-            .then(() => console.log("[" + appConfig.name + "] connect note delivered to the owner's chat"))
-            .catch(() => sleep(2500).then(() => sendNote())
-              .then(() => console.log("[" + appConfig.name + "] connect note delivered on retry"))
-              .catch(error => console.error("[" + appConfig.name + "] connect note failed twice:", error?.message || error)));
-        } else if (ownNumber) {
-          console.log("[" + appConfig.name + "] connect note skipped (cooldown)");
+        const cooldownOver = !this.introSentAt || Date.now() - this.introSentAt >= 60000;
+        if (ownNumber && cooldownOver && this.introSocket !== sock) {
+          this.introSocket = sock;
+          const deliver = () => sendConnectionCard(sock, ownNumber + "@s.whatsapp.net", appConfig, this.commands);
+          try {
+            try {
+              await deliver();
+            } catch {
+              await sleep(2500);
+              if (this.sock !== sock || !this.connected) return;
+              await deliver();
+            }
+            this.introSentAt = Date.now();
+            console.log("[" + appConfig.name + "] connection card sent");
+          } catch (error) {
+            console.error("[" + appConfig.name + "] connection card delivery failed:", error?.message);
+          } finally {
+            if (this.introSocket === sock) this.introSocket = null;
+          }
         }
       } else if (connection === "close") {
         this.connected = false;
