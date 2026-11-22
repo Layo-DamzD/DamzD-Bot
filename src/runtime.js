@@ -22,7 +22,7 @@ import { WELCOME_ON, GOODBYE_ON, ANTILINK_ON } from "./store.js";
 import { registerCallHook, runSideEffects, recordActivity } from "./hooks.js";
 import { HARD_PAUSED, PAUSE_NOTE } from "./flags.js";
 import { resolveJidNumber } from "./lidmap.js";
-import { getCached } from "./cache.js";
+import { getCached, cacheMessage } from "./cache.js";
 import { stashViewOnce, stashRememberMedia, findCachedViewOnce, findViewOnceCarrier, readCachedMedia, viewOnceCacheSize, recentStashIds } from "./viewonce.js";
 import { connectNote } from "../commands/general.js";
 
@@ -386,7 +386,25 @@ async function handleReactionSave(deps, sock, msg) {
       // no-op — owners react to those all day. But an id the bot NEVER
       // received used to vanish silently, which cost hours of blind
       // debugging: tell the owner, once, in their own chat.
-      const neverSeen = !getCached(target.id);
+      const snap = getCached(target.id);
+      if (snap && !snap.node) {
+        // The message DID arrive, but WhatsApp withheld the content (the
+        // linked-device view-once limitation) and the phone never re-served
+        // it. Say exactly that instead of "never reached me", and ask the
+        // phone once more — the reaction is a fresh, explicit request.
+        if (msg.key.fromMe || isOwnerNumber(numberFromJid(String(msg.key.participant || chat)))) {
+          const own = numberFromJid(String(sock?.user?.id || ""));
+          if (own) {
+            sock.sendMessage(own + "@s.whatsapp.net", {
+              text: "👀 That message reached me, but its content was withheld and your phone never re-served it — un-opened view-onces re-serve within seconds; opened or expired ones never do.\n" +
+                "I have asked your phone once more. If it stays quiet, ask the sender to resend it now — watch for my 🔒 note in your own chat, then react again. (id …" + String(target.id).slice(-10) + ")"
+            }).catch(() => {});
+          }
+        }
+        await requestWithheldContent(sock, target, "reaction");
+        return false;
+      }
+      const neverSeen = !snap;
       if (neverSeen && (msg.key.fromMe || isOwnerNumber(numberFromJid(String(msg.key.participant || chat))))) {
         const own = numberFromJid(String(sock?.user?.id || ""));
         if (own) {
@@ -470,7 +488,93 @@ async function handleReactionSave(deps, sock, msg) {
   }
 }
 
+// Content-withheld arrivals: WhatsApp hands linked devices (companions) some
+// messages — most famously view-onces — as an id WITHOUT any content, the
+// "unavailable fanout". The old flow dropped them everywhere: recordActivity
+// and processMessage both bail on the missing `message` field, so nothing was
+// cached and a later reaction honestly said "never reached me" for a message
+// that DID arrive (Render logs of 22 Nov prove it: an upsert line for the id,
+// no media line, then "never reached me"). WhatsApp Web's own answer is the
+// placeholder resend — ask the phone to re-serve the content. Un-opened
+// view-onces re-serve within seconds; opened or expired ones never do (the
+// one-serving model). The phone still decides, so privacy is preserved.
+const withheldRequested = new Map(); // id -> ts: one resend request per id
+const withheldNoted = new Map();     // chat -> ts: owner notes, one per 3 min
+let withheldBudget = 40;             // total requests per boot: bounded
+let withheldLastSent = 0;            // global spacing between requests
+
+function withheldWho(jid) {
+  const chat = String(jid || "");
+  return chat.endsWith("@g.us")
+    ? "a group chat"
+    : (chat.endsWith("@lid") ? "a contact" : "+" + (numberFromJid(chat) || "unknown chat"));
+}
+
+async function requestWithheldContent(sock, key, reason) {
+  if (!key?.id || withheldBudget <= 0) return false;
+  const id = String(key.id);
+  const now = Date.now();
+  if (now - (withheldRequested.get(id) || 0) < 10 * 60 * 1000) return false;
+  if (now - withheldLastSent < 3000) return false; // pace the protocol traffic
+  try {
+    if (typeof sock?.requestPlaceholderResend !== "function") return false;
+    await sock.requestPlaceholderResend({
+      remoteJid: String(key.remoteJid || ""),
+      id: key.id,
+      fromMe: Boolean(key.fromMe),
+      participant: key.participant ? String(key.participant) : undefined
+    });
+    withheldBudget -= 1;
+    withheldRequested.set(id, now);
+    withheldLastSent = now;
+    console.log("[" + appConfig.name + "] content withheld for id=…" + id.slice(-10) + " — placeholder resend requested (" + reason + ")");
+    return true;
+  } catch { return false; }
+}
+
+async function handleWithheldArrival(sock, msg) {
+  // Detection: an arrival with no content at all, or an explicit stub
+  // ("No message found"). Real messages always carry `message`.
+  const key = msg?.key;
+  const stubParams = String(msg?.messageStubParameters?.[0] || "");
+  const isStub = (!msg?.message && Boolean(key?.id)) || stubParams.includes("No message found");
+  if (!isStub) return false;
+  const jid = String(key?.remoteJid || "");
+  if (!jid || jid === "status@broadcast" || jid.endsWith("@newsletter")) return false;
+  const id = String(key.id);
+  // Cache the stub so reactions and Ggs see "arrived, content withheld"
+  // instead of "never reached me". A later re-serve with the same id
+  // overwrites this record with the real content.
+  try {
+    cacheMessage(id, {
+      jid,
+      sender: key.participant ? String(key.participant) : jid,
+      text: "[content withheld by WhatsApp — re-requested from the phone]",
+      node: null
+    });
+  } catch { /* caching must never break processing */ }
+  const requested = await requestWithheldContent(sock, key, "arrival");
+  const now = Date.now();
+  if (requested && now - (withheldNoted.get(jid) || 0) > 3 * 60 * 1000) {
+    withheldNoted.set(jid, now);
+    try {
+      const own = numberFromJid(String(sock?.user?.id || ""));
+      if (own) {
+        sock.sendMessage(own + "@s.whatsapp.net", {
+          text: "👀 A message arrived from " + withheldWho(jid) + " but WhatsApp delivered it to me without content — this is how linked devices receive some view-onces.\n" +
+            "I have asked your phone to re-serve it: if it is still un-opened, it lands within seconds — watch for the 🔒 note in this chat.\n" +
+            "If nothing arrives, it was already opened or has expired; ask the sender to resend it. (id …" + id.slice(-10) + ")"
+        }).catch(() => {});
+      }
+    } catch { /* notes must never break processing */ }
+  }
+  return true;
+}
+
 export async function processMessage(deps, sock, msg) {
+  // Rescue content-withheld arrivals BEFORE the message-less early return
+  // below — these used to vanish, taking the view-once with them.
+  if (await handleWithheldArrival(sock, msg)) return;
   if (!msg?.message || !msg?.key?.remoteJid) return;
   const jid = String(msg.key.remoteJid);
   if (jid === "status@broadcast" || jid.endsWith("@newsletter")) return;
@@ -948,6 +1052,10 @@ export class DamzDBot {
       for (const msg of messages) {
         try {
           if (!live) {
+            // History replays carry content-withheld stubs too — messages
+            // that arrived while the bot was unpaired. Rescue them the same
+            // way (cache + bounded resend request), still never speaking.
+            if (await handleWithheldArrival(sock, msg)) continue;
             stashViewOnce(msg);
             stashRememberMedia(msg);
             await recordActivity(sock, msg);

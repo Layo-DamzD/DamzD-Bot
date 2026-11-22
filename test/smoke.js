@@ -51,12 +51,14 @@ const lookup = buildLookup(commands);
 const memory = new ChatMemory(process.env.DATA_DIR);
 const store = new JsonStore(process.env.DATA_DIR, "settings.json");
 
+const resendRequests = [];
 const ownerSock = {
   user: { id: "2348000000002@s.whatsapp.net" },
   sendMessage: async (jid, content) => { sent.push({ jid, content }); return {}; },
   sendPresenceUpdate: async (type, jid) => { presence.push({ type, jid }); },
   groupMetadata: async () => groupMeta,
-  groupParticipantsUpdate: async () => ({})
+  groupParticipantsUpdate: async () => ({}),
+  requestPlaceholderResend: async key => { resendRequests.push(key); return "REQ-" + resendRequests.length; }
 };
 
 const nonOwnerSock = {
@@ -64,7 +66,8 @@ const nonOwnerSock = {
   sendMessage: async (jid, content) => { sent.push({ jid, content }); return {}; },
   sendPresenceUpdate: async (type, jid) => { presence.push({ type, jid }); },
   groupMetadata: async () => groupMeta,
-  groupParticipantsUpdate: async () => ({})
+  groupParticipantsUpdate: async () => ({}),
+  requestPlaceholderResend: async key => { resendRequests.push(key); return "REQ-" + resendRequests.length; }
 };
 
 function textMessage(text, overrides = {}) {
@@ -517,6 +520,39 @@ await check(".Ggs recovery failures stay silent for members and note the owner o
   setAccessMode("self");
 });
 
+await check("content-withheld arrival is cached, re-requested from the phone, and explained", async () => {
+  setAccessMode("self");
+  sent.length = 0;
+  resendRequests.length = 0;
+  // The 22 Nov Render logs proved this shape: an upsert line for the id, no
+  // media line, then "never reached me". The arrival carries key.id but NO
+  // message — the linked-device "unavailable fanout" of a view-once.
+  const stub = { key: { remoteJid: "251814620463268@lid", id: "WITHHELD-STUB-1", fromMe: false, participant: "251814620463268@lid" } };
+  await processMessage(deps, ownerSock, stub);
+  assert.equal(resendRequests.length, 1, "placeholder resend requested exactly once");
+  assert.equal(resendRequests[0].id, "WITHHELD-STUB-1", "the resend targets the withheld id");
+  const note = sent.map(item => item.content?.text || "").find(Boolean) || "";
+  assert.match(note, /without content/, "the owner learns what happened");
+  assert.match(note, /re-serve/, "the owner learns what to expect");
+  assert.doesNotMatch(note, /never reached me/, "the misleading note is gone for arrivals the bot did receive");
+});
+
+await check("reacting to a still-withheld message explains the wall instead of 'never reached me'", async () => {
+  sent.length = 0;
+  const stub = { key: { remoteJid: "251814620463268@lid", id: "WITHHELD-STUB-2", fromMe: false, participant: "251814620463268@lid" } };
+  await processMessage(deps, ownerSock, stub); // cache the withheld stub
+  sent.length = 0;
+  const reaction = {
+    key: { remoteJid: "251814620463268@lid", fromMe: true, id: "REACT-W2" },
+    message: { reactionMessage: { text: "❤️", key: { remoteJid: "251814620463268@lid", id: "WITHHELD-STUB-2", fromMe: false, participant: "251814620463268@lid" } } }
+  };
+  await processMessage(deps, ownerSock, reaction);
+  const note = sent.map(item => item.content?.text || "").find(Boolean) || "";
+  assert.match(note, /withheld/, "the owner gets the withheld explanation");
+  assert.match(note, /resend it now/, "the note points to the fix");
+  assert.doesNotMatch(note, /never reached me/, "the old misleading note is gone for received ids");
+});
+
 await check("non-owner group message without mention stays quiet", async () => {
   sent.length = 0;
   groqCalls.length = 0;
@@ -763,7 +799,7 @@ await check("connectNote greets the owner in the menu's look", async () => {
   const { connectNote } = await import("../commands/general.js");
   const note = connectNote({ name: "DamzD", prefix: "." });
   assert.match(note, /connected and online/);
-  assert.match(note, /1\.4\.41/);
+  assert.match(note, /1\.4\.42/);
   assert.match(note, /PREFIX|𝗣𝗥𝗘𝗙𝗜𝗫/);
   assert.match(note, /OWNER|𝗢𝗪𝗡𝗘𝗥/);
   assert.match(note, /MODE|𝗠𝗢𝗗𝗘/);

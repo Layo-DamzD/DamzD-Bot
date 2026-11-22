@@ -144,8 +144,14 @@ async function quotedMedia(ctx, { allowDocument = true } = {}) {
       // fix: resend while online, watch for the lock note, then react/Ggs.
       const { getCached } = await import("../src/cache.js");
       const { recentStashIds } = await import("../src/viewonce.js");
-      if (!getCached(info?.stanzaId)) {
+      const snapEntry = getCached(info?.stanzaId);
+      if (!snapEntry) {
         throw new Error("that message never reached me — it was sent while I was offline, restarting or re-pairing, and WhatsApp does not re-deliver missed media. Ask the sender to resend it now; watch for my 🔒 note in your own chat, then react or reply Ggs. (Recent ids remembered: " + (recentStashIds(3).map(x => "…" + x).join("  ") || "none") + ".)");
+      }
+      if (!snapEntry.node) {
+        // The message DID arrive but arrived content-less (the linked-device
+        // view-once limitation) and the phone never re-served it. Say so.
+        throw new Error("that message reached me, but WhatsApp withheld its content — the linked-device view-once limitation. I asked your phone to re-serve it when it arrived: un-opened view-onces land in seconds, opened or expired ones never do. Ask the sender to resend it now; watch for my 🔒 note, then react or reply Ggs.");
       }
       throw error;
     }
