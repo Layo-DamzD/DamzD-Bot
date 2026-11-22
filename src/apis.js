@@ -273,13 +273,27 @@ export async function translateText(text, targetLanguage) {
   const clean = String(text || "").trim();
   if (!clean) throw new Error("give me something to translate");
   const target = resolveLanguageCode(targetLanguage) || "en";
-  const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=" +
-    encodeURIComponent(target) + "&dt=t&q=" + encodeURIComponent(clean.slice(0, 4000));
-  const payload = await fetchJson(url, { label: "translation service" });
-  const chunks = Array.isArray(payload?.[0]) ? payload[0].map(part => part?.[0] || "") : [];
-  const translated = chunks.join("").trim();
-  if (!translated) throw new Error("the translation came back empty");
-  return translated;
+  try {
+    const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=" +
+      encodeURIComponent(target) + "&dt=t&q=" + encodeURIComponent(clean.slice(0, 4000));
+    const payload = await fetchJson(url, { label: "translation service" });
+    const chunks = Array.isArray(payload?.[0]) ? payload[0].map(part => part?.[0] || "") : [];
+    const translated = chunks.join("").trim();
+    if (translated) return translated;
+  } catch { /* fall through to the backup service */ }
+  // Google's free endpoint is block- and quota-gated per IP — it started
+  // serving its "Sorry..." HTML page instead of JSON. MyMemory is the backup;
+  // its quota warning arrives INSIDE translatedText, so reject that too.
+  const back = await fetchJson(
+    "https://api.mymemory.translated.net/get?q=" + encodeURIComponent(clean.slice(0, 900)) +
+    "&langpair=auto|" + encodeURIComponent(target),
+    { label: "translation service" }
+  );
+  const fallback = String(back?.responseData?.translatedText || "").trim();
+  if (!fallback || /MYMEMORY WARNING|INVALID|QUERY LENGTH/i.test(fallback)) {
+    throw new Error("the translation services are exhausted right now");
+  }
+  return fallback;
 }
 
 // ---------------------------------------------------------------- media & tools

@@ -258,16 +258,28 @@ export default [
       const quoted = info?.quotedMessage;
       if (!quoted) throw new Error("reply to a message to inspect it");
       const { unwrapMessage, messageText } = await import("../src/utils.js");
+      const { getCached } = await import("../src/cache.js");
+      const { findViewOnceCarrier } = await import("../src/viewonce.js");
       const inner = unwrapMessage(quoted);
       const type = Object.keys(inner).find(key => key.endsWith("Message")) || "unknown";
       const mediaTypes = ["imageMessage", "videoMessage", "audioMessage", "stickerMessage", "documentMessage"];
       const mediaNode = mediaTypes.map(key => inner[key]).find(Boolean);
+      // WhatsApp strips the view-once wrapper from quoted copies, so a REAL
+      // view-once always shows "false" when inspected through the quote.
+      // The snapshot of the original arrival is the truth.
+      const cached = info?.stanzaId ? getCached(String(info.stanzaId)) : null;
+      const original = cached?.node ? findViewOnceCarrier(cached.node) : null;
+      let viewOnceLine = "";
+      if (original) viewOnceLine = "View-once: true (on the original arrival)";
+      else if (cached && !cached.node) viewOnceLine = "View-once: original arrived WITHOUT content (linked-device withholding)";
+      else if (mediaNode) viewOnceLine = "View-once: " + Boolean(quoted.viewOnceMessage || quoted.viewOnceMessageV2) + " (from the quote — quotes always arrive unwrapped)";
       const lines = [
         "Type: *" + type + "*",
         mediaNode?.mimetype ? "MIME: " + mediaNode.mimetype : "",
         mediaNode?.fileLength ? "Size: " + Number(mediaNode.fileLength).toLocaleString() + " bytes" : "",
         mediaNode?.seconds ? "Duration: " + mediaNode.seconds + "s" : "",
-        mediaNode ? "View-once: " + Boolean(quoted.viewOnceMessage || quoted.viewOnceMessageV2) : "",
+        viewOnceLine,
+        info?.stanzaId ? "Arrival id: …" + String(info.stanzaId).slice(-10) : "",
         messageText(quoted) ? "Text: " + messageText(quoted).slice(0, 200) : ""
       ].filter(Boolean);
       await ctx.reply(lines.join("\n"));
@@ -431,15 +443,29 @@ export default [
     run: async ctx => {
       const info = ctx.msg.message?.extendedTextMessage?.contextInfo;
       const participant = info?.participant;
-      const number = participant ? String(participant).split("@")[0] : ctx.senderNumber;
+      const { resolveJidNumber } = await import("../src/lidmap.js");
+      // In LID-mode chats the participant is a privacy LID, not a phone
+      // number — profilePictureUrl with "LID@s.whatsapp.net" fails for users
+      // who clearly DO have a picture. Resolve the real phone JID first.
+      const isGroup = String(ctx.jid).endsWith("@g.us");
+      const resolved = await resolveJidNumber(ctx.sock, participant || (isGroup ? "" : ctx.jid));
+      const candidates = [];
+      if (resolved?.jid) candidates.push(resolved.jid);
+      if (participant) candidates.push(String(participant));
+      const senderDigits = String(ctx.senderNumber || "").split("@")[0];
+      if (senderDigits) candidates.push(senderDigits + "@s.whatsapp.net");
       await ctx.typing(900);
-      try {
-        const url = await ctx.sock.profilePictureUrl(number + "@s.whatsapp.net", "image");
-        const buffer = await fetchBuffer(url, { timeoutMs: 45000, label: "profile picture" });
-        await ctx.send({ image: buffer, caption: "*" + (participant ? "+" + number : ctx.pushName || "+" + number) + "*'s profile picture" });
-      } catch {
-        throw new Error("that user has no visible profile picture");
+      let url = null;
+      for (const jid of [...new Set(candidates.filter(Boolean))]) {
+        try {
+          url = await ctx.sock.profilePictureUrl(jid, "image");
+          break;
+        } catch { /* try the next identity form */ }
       }
+      if (!url) throw new Error("that user has no visible profile picture");
+      const buffer = await fetchBuffer(url, { timeoutMs: 45000, label: "profile picture" });
+      const who = resolved?.number || senderDigits;
+      await ctx.send({ image: buffer, caption: "*" + (participant ? "+" + who : ctx.pushName || "+" + who) + "*'s profile picture" });
     }
   },
   {

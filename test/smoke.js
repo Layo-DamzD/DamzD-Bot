@@ -553,6 +553,30 @@ await check("reacting to a still-withheld message explains the wall instead of '
   assert.doesNotMatch(note, /never reached me/, "the old misleading note is gone for received ids");
 });
 
+await check(".vvinfo reads the cached original, not the always-unwrapped quote", async () => {
+  const { cacheMessage } = await import("../src/cache.js");
+  // The quote arrives unwrapped (bare imageMessage) — WhatsApp strips the
+  // view-once wrapper from quoted copies, which made .vvinfo say "false"
+  // for a real view-once. The snapshot of the original arrival knows better.
+  cacheMessage("VV-ORIG-1", {
+    jid: "251814620463268@lid", sender: "251814620463268@lid", text: "",
+    node: { viewOnceMessageV2: { message: { imageMessage: { mimetype: "image/jpeg", url: "https://mmg.whatsapp.net/x.jpg", mediaKey: "abc" } } } }
+  });
+  cacheMessage("VV-WITHHELD-1", { jid: "251814620463268@lid", sender: "251814620463268@lid", text: "", node: null });
+  sent.length = 0;
+  const reply = stanzaId => ({
+    key: { remoteJid: "2348000000001@s.whatsapp.net", fromMe: true, id: "VV-INFO-" + stanzaId },
+    pushName: "Tester",
+    message: { extendedTextMessage: { text: ".vvinfo", contextInfo: { stanzaId, participant: "251814620463268@lid", quotedMessage: { imageMessage: { mimetype: "image/jpeg" } } } } }
+  });
+  await processMessage(deps, ownerSock, reply("VV-ORIG-1"));
+  assert.match(firstText(), /View-once: true/, "the cached original reveals the view-once wrapper");
+  assert.match(firstText(), /Arrival id/, "the arrival id is shown for reference");
+  sent.length = 0;
+  await processMessage(deps, ownerSock, reply("VV-WITHHELD-1"));
+  assert.match(firstText(), /WITHOUT content/, "a withheld arrival is reported as withheld, not 'false'");
+});
+
 await check("non-owner group message without mention stays quiet", async () => {
   sent.length = 0;
   groqCalls.length = 0;
@@ -799,7 +823,7 @@ await check("connectNote greets the owner in the menu's look", async () => {
   const { connectNote } = await import("../commands/general.js");
   const note = connectNote({ name: "DamzD", prefix: "." });
   assert.match(note, /connected and online/);
-  assert.match(note, /1\.4\.42/);
+  assert.match(note, /1\.4\.43/);
   assert.match(note, /PREFIX|𝗣𝗥𝗘𝗙𝗜𝗫/);
   assert.match(note, /OWNER|𝗢𝗪𝗡𝗘𝗥/);
   assert.match(note, /MODE|𝗠𝗢𝗗𝗘/);

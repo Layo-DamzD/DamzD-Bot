@@ -246,35 +246,6 @@ export default [
     }
   },
   {
-    name: "play2",
-    category: "Downloads",
-    description: "send a song as audio (alternate path)",
-    run: async ctx => {
-      const query = String(ctx.args || "").trim();
-      if (!query) throw new Error("tell me the song or artist name");
-      await ctx.typing(1500);
-      await sendSong(ctx, query);
-    }
-  },
-  {
-    name: "spotify",
-    category: "Downloads",
-    description: "find a track and send a preview",
-    run: async ctx => {
-      const query = String(ctx.args || "").trim();
-      if (!query) throw new Error("tell me the track name");
-      await ctx.typing(1000);
-      const { spotifyPreview } = await import("../src/apis.js");
-      const track = await spotifyPreview(query);
-      await ctx.send({
-        audio: { url: track.preview },
-        mimetype: "audio/mpeg",
-        fileName: cleanTitle(track.artist + " - " + track.title + " (preview)") + ".mp3",
-        ptt: false
-      });
-    }
-  },
-  {
     name: "ytsearch",
     category: "Downloads",
     description: "search YouTube without downloading",

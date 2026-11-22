@@ -545,38 +545,6 @@ export default [
     }
   },
   {
-    name: "addmeta",
-    aliases: ["addai", "addmetaai"],
-    category: "Group",
-    description: "try to add Meta AI to this group",
-    run: async ctx => {
-      await requireGroup(ctx);
-      await requireAdmin(ctx);
-      try {
-        await ctx.sock.groupParticipantsUpdate(ctx.jid, ["13135550002@s.whatsapp.net"], "add");
-        await ctx.reply("I sent an add request to Meta AI — if WhatsApp allows it in your region, it will appear shortly.");
-      } catch {
-        throw new Error("WhatsApp did not accept the request — Meta AI availability depends on your region and account");
-      }
-    }
-  },
-  {
-    name: "removemeta",
-    aliases: ["removeai", "removemetaai"],
-    category: "Group",
-    description: "remove Meta AI from this group",
-    run: async ctx => {
-      await requireGroup(ctx);
-      await requireAdmin(ctx);
-      try {
-        await ctx.sock.groupParticipantsUpdate(ctx.jid, ["13135550002@s.whatsapp.net"], "remove");
-        await ctx.reply("Done — Meta AI removal requested.");
-      } catch {
-        throw new Error("I could not remove that participant — it may not be Meta AI after all");
-      }
-    }
-  },
-  {
     name: "del",
     category: "Group",
     description: "delete a message I sent (reply to it)",

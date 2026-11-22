@@ -68,18 +68,18 @@ export default [
   modelCommand("terra", [],
     "GPT-6.1 Terra — the third GPT-6.1 flavour", ["puter-model:gpt-6.1-terra"]),
   modelCommand("llama", ["groq"],
-    "Llama 3.3 70B — real Groq on child bots; the main bot answers with its Puter brains instead", ["groq"]),
+    "Llama 3.3 70B — fast and capable, great for quick factual answers", ["groq"]),
   modelCommand("luna", ["gpt5"],
-    "GPT-6 Luna via your Puter key (falls back to NABEES GPT-5 Luna)", ["puter-model:gpt-6-luna", "nabees-luna"]),
+    "GPT-6 Luna — quick answers, light and fast", ["puter-model:gpt-6-luna", "nabees-luna"]),
   modelCommand("deepseek", ["deepseek2", "deepseek3"],
-    "DeepSeek V4 Flash from the NABEES studio (shares your daily NABEES quota)", ["nabees-deepseek"]),
+    "DeepSeek V4 Flash — sharp reasoning at speed", ["nabees-deepseek"]),
   modelCommand("claude", [],
-    "REAL Claude Opus 5.5 (latest) via your Puter key — otherwise my built-in brains in Claude's careful style", ["puter-model:claude-opus-5-5", "puter-model:claude-sonnet-5-5"],
+    "Claude Opus 5.5 — careful, nuanced reasoning", ["puter-model:claude-opus-5-5", "puter-model:claude-sonnet-5-5"],
     "Answer like a thoughtful reasoning model: careful, nuanced, balanced."),
   modelCommand("fable", [],
-    "REAL Claude Fable 5.2 — Anthropic's storyteller, best for stories & creative writing", ["puter-model:claude-fable-5-2"]),
+    "Claude Fable 5.2 — the storyteller, best for stories & creative writing", ["puter-model:claude-fable-5-2"]),
   modelCommand("gemini", ["gemini2"],
-    "REAL Gemini 4 Argon (latest) via your Puter key — otherwise my built-in brains with extra creativity", ["puter-model:gemini-4-argon", "puter-model:gemini-3.8-flash"],
+    "Gemini 4 Argon — creative, imaginative answers", ["puter-model:gemini-4-argon", "puter-model:gemini-3.8-flash"],
     "Answer like a creative model: imaginative, vivid, open to playful angles."),
   styleCommand("grok", [], "witty, bold answers, Grok-style (my built-in brains)",
     "Answer with wit and confidence: bold, playful, a little cheeky — but accurate, helpful and safe."),
@@ -135,7 +135,21 @@ export default [
       }
       if (!text) throw new Error("give me the text to translate");
       await ctx.typing(900);
-      const result = await translateText(text, target);
+      let result = "";
+      try {
+        result = await translateText(text, target);
+      } catch {
+        // The free translation endpoints are block- and quota-gated per IP —
+        // Google started serving its "Sorry..." page instead of JSON. The
+        // brains never are. Same promise, different engine.
+        const languageName = pipeSplit.length >= 2 ? String(pipeSplit[0]).trim() : target;
+        result = await askAIAboutText({
+          prompt: "Translate this text to " + languageName + ". Reply with ONLY the translation — no quotes, no notes, no explanation:\n\n" + text.slice(0, 2500),
+          history: [],
+          ownerName: ctx.config.ownerName,
+          style: ""
+        });
+      }
       await ctx.reply("*" + result + "*");
     }
   }
