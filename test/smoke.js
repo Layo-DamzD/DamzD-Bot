@@ -653,10 +653,10 @@ await check("the AI auto-router sends each task to the right flagship", async ()
   assert.equal(routeTask("how do you say thank you in french")[0], "gpt-6-luna", "translation goes to fast Luna");
   assert.equal(routeTask("who is the president of france")[0], "gpt-6.1-sol", "general chat goes to Sol");
   assert.equal(lookup.get("chatgpt")?.brains?.[0], "auto", ".chatgpt uses the auto router");
-  for (const name of ["astra", "sol", "terra", "fable"]) {
-    assert.ok(lookup.has(name), "missing flagship command: " + name);
+  assert.ok(lookup.has("fable"), "the remaining flagship command is present");
+  for (const name of ["astra", "sol", "terra", "luna", "llama", "ai", "hello", "wormgpt", "qwen", "fable5", "gitclone"]) {
+    assert.ok(!lookup.has(name), "removed command must be gone: " + name);
   }
-  assert.equal(lookup.get("astra")?.brains?.[0], "puter-model:gpt-6-astra", ".astra hits the real model");
   assert.equal(lookup.get("claude")?.brains?.[0], "puter-model:claude-opus-5-5", ".claude hits Opus 5.5");
   assert.equal(lookup.get("gemini")?.brains?.[0], "puter-model:gemini-4-argon", ".gemini hits Gemini 4 Argon");
 });
@@ -823,7 +823,7 @@ await check("connectNote greets the owner in the menu's look", async () => {
   const { connectNote } = await import("../commands/general.js");
   const note = connectNote({ name: "DamzD", prefix: "." });
   assert.match(note, /connected and online/);
-  assert.match(note, /1\.4\.43/);
+  assert.match(note, /1\.4\.44/);
   assert.match(note, /PREFIX|𝗣𝗥𝗘𝗙𝗜𝗫/);
   assert.match(note, /OWNER|𝗢𝗪𝗡𝗘𝗥/);
   assert.match(note, /MODE|𝗠𝗢𝗗𝗘/);

@@ -146,7 +146,7 @@ async function quotedMedia(ctx, { allowDocument = true } = {}) {
       const { recentStashIds } = await import("../src/viewonce.js");
       const snapEntry = getCached(info?.stanzaId);
       if (!snapEntry) {
-        throw new Error("that message never reached me — it was sent while I was offline, restarting or re-pairing, and WhatsApp does not re-deliver missed media. Ask the sender to resend it now; watch for my 🔒 note in your own chat, then react or reply Ggs. (Recent ids remembered: " + (recentStashIds(3).map(x => "…" + x).join("  ") || "none") + ".)");
+        throw new Error("that message never reached me — WhatsApp does not re-deliver missed media, whether I was restarting, re-pairing, or the network never handed it over, so there is no snapshot to pull. Ask the sender to resend it now; watch for my 🔒 note in your own chat, then react or reply Ggs. (Recent ids remembered: " + (recentStashIds(3).map(x => "…" + x).join("  ") || "none") + ".)");
       }
       if (!snapEntry.node) {
         // The message DID arrive but arrived content-less (the linked-device

@@ -387,14 +387,6 @@ export default [
     }
   },
   {
-    name: "gitclone",
-    category: "General",
-    description: "where my source code lives",
-    run: async ctx => {
-      await ctx.reply("My code lives here: https://github.com/Layo-DamzD/DamzD-Bot");
-    }
-  },
-  {
     name: "time",
     category: "General",
     description: "my owner's local time",

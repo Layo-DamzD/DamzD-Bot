@@ -70,12 +70,6 @@ const activities = [
   "Recommend one book, film or show worth people's time."
 ];
 
-const greetings = [
-  "Hello there. 😊 How is your day going?",
-  "Hey! Good to see you around. What is new?",
-  "Hi! I was just here, keeping things quiet. What can I do for you?"
-];
-
 const pending = new Map();
 
 function normalizeAnswer(value) {
@@ -351,12 +345,6 @@ export default [
     category: "Fun",
     description: "a random fox photo",
     run: async ctx => sendPicture(ctx, foxImage(), "🦊 Here you go.")
-  },
-  {
-    name: "hello",
-    category: "Fun",
-    description: "say hello to me",
-    run: async ctx => ctx.reply(pick(greetings))
   },
   {
     name: "echo",

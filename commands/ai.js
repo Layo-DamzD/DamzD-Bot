@@ -52,25 +52,8 @@ function modelCommand(name, aliases, description, brains, fallbackStyle) {
 }
 
 export default [
-  {
-    name: "ai",
-    aliases: ["ask"],
-    category: "AI & Chat",
-    description: "ask me anything directly",
-    run: async ctx => askStyled(ctx, "")
-  },
   modelCommand("chatgpt", ["gpt"],
-    "smart router — reads your question and picks the best GPT-6 brain: Astra for code, Sol for maths & general, Luna for quick answers", ["auto"]),
-  modelCommand("astra", [],
-    "GPT-6 Astra — the coding brain (code, bugs, scripts, algorithms)", ["puter-model:gpt-6-astra"]),
-  modelCommand("sol", [],
-    "GPT-6.1 Sol — deep reasoning for maths, logic and general questions", ["puter-model:gpt-6.1-sol"]),
-  modelCommand("terra", [],
-    "GPT-6.1 Terra — the third GPT-6.1 flavour", ["puter-model:gpt-6.1-terra"]),
-  modelCommand("llama", ["groq"],
-    "Llama 3.3 70B — fast and capable, great for quick factual answers", ["groq"]),
-  modelCommand("luna", ["gpt5"],
-    "GPT-6 Luna — quick answers, light and fast", ["puter-model:gpt-6-luna", "nabees-luna"]),
+    "smart router — reads your question and picks the best brain for it: code, maths, creative or quick answers", ["auto"]),
   modelCommand("deepseek", ["deepseek2", "deepseek3"],
     "DeepSeek V4 Flash — sharp reasoning at speed", ["nabees-deepseek"]),
   modelCommand("claude", [],
@@ -83,12 +66,6 @@ export default [
     "Answer like a creative model: imaginative, vivid, open to playful angles."),
   styleCommand("grok", [], "witty, bold answers, Grok-style (my built-in brains)",
     "Answer with wit and confidence: bold, playful, a little cheeky — but accurate, helpful and safe."),
-  styleCommand("qwen", [], "strong multilingual answers, Qwen-style (my built-in brains)",
-    "Answer like a multilingual model: strong across languages, precise translations and phrasing."),
-  styleCommand("fable5", [], "answers like a storyteller",
-    "Answer like a storyteller: warm narrative tone, light metaphor, but still accurate."),
-  styleCommand("wormgpt", [], "a mischievous hacker persona (harmless fun)",
-    "Adopt a playful hacker-movie persona: witty, a little dramatic, cyber slang here and there — but strictly helpful, legal and safe. Never provide real harmful instructions."),
   styleCommand("mathgpt", [], "solves maths step by step",
     "You are a patient maths tutor: solve the problem and show the steps in short numbered lines, then the final answer."),
   {
@@ -135,20 +112,20 @@ export default [
       }
       if (!text) throw new Error("give me the text to translate");
       await ctx.typing(900);
+      // The brains are the engine here — that is what the keys are for — and
+      // the free translation endpoints are only a silent backup if the brains
+      // are unreachable.
+      const languageName = pipeSplit.length >= 2 ? String(pipeSplit[0]).trim() : target;
       let result = "";
       try {
-        result = await translateText(text, target);
-      } catch {
-        // The free translation endpoints are block- and quota-gated per IP —
-        // Google started serving its "Sorry..." page instead of JSON. The
-        // brains never are. Same promise, different engine.
-        const languageName = pipeSplit.length >= 2 ? String(pipeSplit[0]).trim() : target;
-        result = await askAIAboutText({
+        result = String(await askAIAboutText({
           prompt: "Translate this text to " + languageName + ". Reply with ONLY the translation — no quotes, no notes, no explanation:\n\n" + text.slice(0, 2500),
           history: [],
           ownerName: ctx.config.ownerName,
           style: ""
-        });
+        })).trim();
+      } catch {
+        result = await translateText(text, target);
       }
       await ctx.reply("*" + result + "*");
     }
