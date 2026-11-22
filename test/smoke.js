@@ -762,7 +762,7 @@ await check("connectNote greets the owner in the menu's look", async () => {
   const { connectNote } = await import("../commands/general.js");
   const note = connectNote({ name: "DamzD", prefix: "." });
   assert.match(note, /connected and online/);
-  assert.match(note, /1\.4\.37/);
+  assert.match(note, /1\.4\.38/);
   assert.match(note, /PREFIX|𝗣𝗥𝗘𝗙𝗜𝗫/);
   assert.match(note, /OWNER|𝗢𝗪𝗡𝗘𝗥/);
   assert.match(note, /MODE|𝗠𝗢𝗗𝗘/);
@@ -915,6 +915,27 @@ await check("view-once stash catches ephemeral-wrapped view-onces", async () => 
   assert.ok(findCachedViewOnce(chat, "VV-EPH-1"), "the stash found it UNDER the ephemeral wrapper");
 });
 
+await check("universal stash remembers plain media in any wrapper shape", async () => {
+  const { stashRememberMedia, findCachedViewOnce } = await import("../src/viewonce.js");
+  const chat = "2348000000029@s.whatsapp.net";
+  // Plain media under a wrapper the code has never heard of — no view-once
+  // marker anywhere. The deep walk must still remember it.
+  assert.ok(stashRememberMedia({
+    key: { remoteJid: chat, fromMe: false, id: "MEDIA-ANY-1" },
+    message: { someFutureWrapper: { message: { imageMessage: {
+      url: "https://mmg.whatsapp.net/v/t62.7118-24/plain.jpg", mimetype: "image/jpeg"
+    } } } }
+  }), "any media node anywhere in the tree gets remembered");
+  const found = findCachedViewOnce(chat, "MEDIA-ANY-1");
+  assert.ok(found, "the recovery lookup finds the remembered media");
+  assert.equal(found.node.url, "https://mmg.whatsapp.net/v/t62.7118-24/plain.jpg", "the node comes back intact");
+  assert.equal(found.wasViewOnce, false, "it is not masquerading as a view-once");
+  assert.equal(stashRememberMedia({
+    key: { remoteJid: chat, fromMe: false, id: "MEDIA-ANY-1" },
+    message: { imageMessage: { url: "https://mmg.whatsapp.net/other.jpg" } }
+  }), false, "an already-remembered id is left alone");
+});
+
 await check("reaction falls back to the anti-delete snapshot (view-once only)", async () => {
   const { cacheMessage } = await import("../src/cache.js");
   const chat = "2348000000019@s.whatsapp.net";
@@ -973,7 +994,8 @@ await check("reaction to a message the bot never received notes the owner instea
     key: { remoteJid: chat, fromMe: true, id: "REACT-UNKNOWN-1" },
     message: { reactionMessage: { key: { remoteJid: chat, id: "NEVER-SEEN-42", fromMe: false }, text: "👀" } }
   });
-  assert.match(firstText(), /never received that message/, "the owner learns why nothing was pulled");
+  assert.match(firstText(), /never reached me/, "the owner learns why nothing was pulled");
+  assert.match(firstText(), /media messages remembered since boot/, "the note reports stash coverage");
   // reacting to a known plain-text message stays a silent no-op
   const { cacheMessage } = await import("../src/cache.js");
   cacheMessage("PLAINTEXT-1", { jid: chat, text: "just talking", node: { conversation: "just talking" } });

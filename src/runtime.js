@@ -23,7 +23,7 @@ import { registerCallHook, runSideEffects, recordActivity } from "./hooks.js";
 import { HARD_PAUSED, PAUSE_NOTE } from "./flags.js";
 import { resolveJidNumber } from "./lidmap.js";
 import { getCached } from "./cache.js";
-import { stashViewOnce, findCachedViewOnce, findViewOnceCarrier, readCachedMedia, viewOnceCacheSize } from "./viewonce.js";
+import { stashViewOnce, stashRememberMedia, findCachedViewOnce, findViewOnceCarrier, readCachedMedia, viewOnceCacheSize } from "./viewonce.js";
 import { connectNote } from "../commands/general.js";
 
 const MAX_PROCESSED_IDS = 2000;
@@ -359,10 +359,11 @@ async function handleReactionSave(deps, sock, msg) {
     let cached = findCachedViewOnce(target.remoteJid || chat, target.id);
     let kind = cached?.kind;
     let node = cached?.node;
-    // Not in the view-once stash (restart, TTL, wrapper shape)? The
-    // anti-delete snapshot still holds the last 600 arrivals — but the
-    // fallback only fires when that snapshot really was a view-once, so a
-    // reaction to a plain photo stays a no-op.
+    // Not in the stash (restart, TTL, wrapper shape)? The anti-delete
+    // snapshot still holds the last 600 arrivals — the fallback fires when
+    // that snapshot really was a view-once. Plain media the bot saw is
+    // remembered too now, so a reaction to it recovers as well; only ids
+    // that truly never arrived end at the owner note below.
     if (!cached) {
       const carrier = findViewOnceCarrier(getCached(target.id)?.node);
       if (carrier) {
@@ -382,10 +383,10 @@ async function handleReactionSave(deps, sock, msg) {
         const own = numberFromJid(String(sock?.user?.id || ""));
         if (own) {
           sock.sendMessage(own + "@s.whatsapp.net", {
-            text: "👀 Reaction noted, but I never received that message, so there is nothing to pull back.\n" +
-              "I can only recover media I actually saw arrive — it was likely sent while I was offline or before the last restart.\n" +
-              "Ask the sender to send it again, then react or reply Ggs to it.\n" +
-              "(id " + target.id + " — it never reached me. View-once messages remembered since boot: " + viewOnceCacheSize() + ".)"
+            text: "👀 Reaction noted, but that message never reached me — there is nothing to pull back.\n" +
+              "It was sent while I was offline, restarting or re-pairing: WhatsApp does not re-deliver missed media to a fresh link, so it cannot be recovered, opened or not.\n" +
+              "Ask the sender to resend it NOW — watch for my 🔒 note in your own chat — then react or reply Ggs to it.\n" +
+              "(id " + target.id + " — media messages remembered since boot: " + viewOnceCacheSize() + ".)"
           }).catch(() => {});
         }
       }
@@ -468,7 +469,10 @@ export async function processMessage(deps, sock, msg) {
   // Remember every view-once the bot can legitimately see (its own chats and
   // the groups it is in) — the recovery command matches quoted copies back to
   // these by stanza id, because quotes arrive with the media metadata stripped.
+  // Every other media arrival is remembered too: a reaction is explicit
+  // intent, and the stash now catches media in ANY wrapper shape.
   const stashed = stashViewOnce(msg);
+  stashRememberMedia(msg);
 
   const id = String(msg.key.id || "");
   if (id) {
@@ -848,7 +852,15 @@ export class DamzDBot {
             .then(() => console.log("[" + appConfig.name + "] connect note delivered to the owner's chat"))
             .catch(() => sleep(2500).then(() => sendNote())
               .then(() => console.log("[" + appConfig.name + "] connect note delivered on retry"))
-              .catch(error => console.error("[" + appConfig.name + "] connect note failed twice:", error?.message || error)));
+              .catch(async error => {
+                console.error("[" + appConfig.name + "] connect note failed twice (" + (error?.message || error) + ") — trying text-only...");
+                try {
+                  await sock.sendMessage(ownChatJid, { text: note });
+                  console.log("[" + appConfig.name + "] connect note delivered text-only (the picture was the problem)");
+                } catch (error2) {
+                  console.error("[" + appConfig.name + "] connect note failed text-only too:", error2?.message || error2);
+                }
+              }));
         } else if (ownNumber) {
           console.log("[" + appConfig.name + "] connect note skipped (cooldown)");
         }
@@ -913,6 +925,7 @@ export class DamzDBot {
         try {
           if (!live) {
             stashViewOnce(msg);
+            stashRememberMedia(msg);
             await recordActivity(sock, msg);
             continue;
           }

@@ -55,6 +55,27 @@ function prune() {
   }
 }
 
+// Shared sink: key the node by chat|stanzaId, remember whether it arrived as
+// a real view-once, and let the capture prefetch race WhatsApp's clock.
+function stashMediaNode(msg, node, kind, wasViewOnce) {
+  const chat = normalizeJid(String(msg?.key?.remoteJid || ""));
+  const stanzaId = String(msg?.key?.id || "");
+  if (!chat || !stanzaId) return false;
+  const key = chat + "|" + stanzaId;
+  const entry = {
+    node,
+    kind,
+    at: Date.now(),
+    sender: normalizeJid(String(msg?.key?.participant || "")),
+    wasViewOnce: Boolean(wasViewOnce)
+  };
+  stash.set(key, entry);
+  prune();
+  persistSoon();
+  schedulePrefetch(key, entry);
+  return true;
+}
+
 // Call for every incoming message, before any gating: the cache is passive
 // metadata and must exist for every chat the bot can see, whatever mode it is in.
 export function stashViewOnce(msg) {
@@ -78,23 +99,44 @@ export function stashViewOnce(msg) {
     for (const [nodeKey, kind] of KINDS) {
       const node = inner[nodeKey];
       if (!node) continue;
-      const chat = normalizeJid(String(msg?.key?.remoteJid || ""));
-      const stanzaId = String(msg?.key?.id || "");
-      if (!chat || !stanzaId) return false;
-      const key = chat + "|" + stanzaId;
-      const entry = {
-        node,
-        kind,
-        at: Date.now(),
-        sender: normalizeJid(String(msg?.key?.participant || ""))
-      };
-      stash.set(key, entry);
-      prune();
-      persistSoon();
-      schedulePrefetch(key, entry);
-      return true;
+      return stashMediaNode(msg, node, kind, true);
     }
     return false;
+  } catch {
+    return false; // caching must never break message processing
+  }
+}
+
+// The deeper walk: any media node anywhere in the message tree, whatever
+// wrapper carries it. stashViewOnce's two signals (the wrapper, the viewOnce
+// flag) cover every shape WhatsApp has shipped so far — this catches the one
+// it ships tomorrow. Plain media gets remembered too: reacting to any message
+// the bot actually saw is explicit intent, and the access gate already
+// governs who may pull.
+export function findAnyMediaNode(message, depth = 0) {
+  if (!message || typeof message !== "object" || depth > 6) return null;
+  for (const [nodeKey] of KINDS) {
+    if (message[nodeKey]) return { node: message[nodeKey], key: nodeKey };
+  }
+  for (const value of Object.values(message)) {
+    if (!value || typeof value !== "object") continue;
+    const found = findAnyMediaNode(value, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+export function stashRememberMedia(msg) {
+  try {
+    const message = msg?.message;
+    if (!message) return false;
+    const chat = normalizeJid(String(msg?.key?.remoteJid || ""));
+    const stanzaId = String(msg?.key?.id || "");
+    if (!chat || !stanzaId || stash.has(chat + "|" + stanzaId)) return false;
+    const found = findAnyMediaNode(message);
+    if (!found) return false;
+    const kind = KINDS.find(([nodeKey]) => nodeKey === found.key)?.[1] || "image";
+    return stashMediaNode(msg, found.node, kind, false);
   } catch {
     return false; // caching must never break message processing
   }
@@ -247,7 +289,7 @@ export function findCachedViewOnce(chatJid, stanzaId) {
         stash.delete(chat + "|" + id);
         return null;
       }
-      return { node: entry.node, kind: entry.kind, sender: entry.sender, file: entry.file, size: entry.size };
+      return { node: entry.node, kind: entry.kind, sender: entry.sender, file: entry.file, size: entry.size, wasViewOnce: entry.wasViewOnce };
     }
   }
       // Fallback: WhatsApp can deliver the same chat under two jid forms (the
@@ -261,7 +303,7 @@ export function findCachedViewOnce(chatJid, stanzaId) {
           stash.delete(key);
           continue;
         }
-        return { node: entry.node, kind: entry.kind, sender: entry.sender, file: entry.file, size: entry.size };
+        return { node: entry.node, kind: entry.kind, sender: entry.sender, file: entry.file, size: entry.size, wasViewOnce: entry.wasViewOnce };
       }
     }
   return null;
