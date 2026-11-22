@@ -120,7 +120,10 @@ async function sendMenuWithImage(ctx, text) {
 
 // The connect note sent to the owner's own chat when the bot comes online —
 // the menu's look, one message.
-export function connectNote(config) {
+export function connectNote(config, commands) {
+  if (commands) {
+    return "Connected and online ✅\n" + buildCategoryOverview(commands, config);
+  }
   return [
     BOX_TOP + "⚡ " + config.name + " 〕",
     BOX_LINE + "◇ " + mbold("STATUS") + ": connected and online ✅",

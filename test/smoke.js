@@ -973,7 +973,7 @@ await check("reaction to a message the bot never received notes the owner instea
     key: { remoteJid: chat, fromMe: true, id: "REACT-UNKNOWN-1" },
     message: { reactionMessage: { key: { remoteJid: chat, id: "NEVER-SEEN-42", fromMe: false }, text: "👀" } }
   });
-  assert.match(firstText(), /never received that message/, "the owner learns why nothing was pulled");
+  assert.match(firstText(), /only have the reaction/, "the owner learns why nothing was pulled");
   // reacting to a known plain-text message stays a silent no-op
   const { cacheMessage } = await import("../src/cache.js");
   cacheMessage("PLAINTEXT-1", { jid: chat, text: "just talking", node: { conversation: "just talking" } });
