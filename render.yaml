@@ -16,7 +16,7 @@ services:
       - key: BOT_NAME
         value: DamzD
       - key: BOT_VERSION
-        value: "2.0.1"
+        value: "2.1.1"
       - key: OWNER_NAME
         sync: false    # your name, e.g. Layo
       - key: OWNER_NUMBER

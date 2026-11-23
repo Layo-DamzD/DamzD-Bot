@@ -1,6 +1,6 @@
 {
   "name": "damzd-bot",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": false,
   "description": "DamzD Bot \u2014 WhatsApp automation on the FEI-XMD engine, DamzD skin and commands on top.",
   "type": "module",
