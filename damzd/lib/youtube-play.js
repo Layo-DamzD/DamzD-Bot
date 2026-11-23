@@ -1,21 +1,25 @@
-// The .song engine — a three-rung ladder, each rung verified live:
+// The .song engine — the v2.3.1 ladder, every rung verified live:
 //
 //   1) NABEES all-in-one (apis.nabeestech.com) — the owner's preferred
 //      provider; needs NABEES_API_KEY. Full YouTube-to-mp3 conversion.
 //      (Currently hard-down HTTP 530 — the rung re-arms itself whenever
 //      the service comes back; no code change needed.)
-//   2) Apple/YouTube identify the real track (artist + title), then every
-//      still-alive public downloader the owner suggested is tried: Siputzx
-//      (host up, downloader routes removed upstream), Dark Yasiya, Izumi,
-//      Gifted (DNS dead). When one of them ever comes back it slots in
-//      here — see PUBLIC_DOWNLOADERS below.
-//   3) Apple 30-second preview + the YouTube link — never leaves the user
-//      empty-handed; both are stable first-party endpoints.
+//   2) Cloud-safe full-track tiers (lib/render-music.js): Audius first
+//      (keyless decentralized nodes — Render's datacenter IPs never get
+//      blocked), then SoundCloud (web player's own client_id; only full
+//      uploads with a progressive stream pass). Both verify the UPLOADER
+//      against the officially identified artist and demand ≥90 seconds,
+//      so remixes, covers and label snippets never stand in for the song.
+//   3) Owner-suggested public downloaders over the identified video:
+//      Siputzx, Dark Yasiya, Izumi, Gifted — usually dead, harmless to try.
+//   4) The honest end: identified title + the YouTube link. No 30-second
+//      Apple preview — the owner retired it; a snippet is not the song.
 //
 // Search (for .ytsearch) uses YouTube's own innertube WEB API — the old
 // eliteprotech provider is gone. No JioSaavn: the owner does not want
 // Bollywood/regional substitutes standing in for real tracks.
 import { validateHttpsUrl } from "./api-client.js";
+import { audiusFullTrack, soundcloudFullTrack } from "./render-music.js";
 
 const NABEES_AIO = "https://apis.nabeestech.com/api/v1/download/aio";
 const ITUNES = "https://itunes.apple.com/search";
@@ -121,11 +125,13 @@ async function publicDownloaderAudio(identity) {
 }
 
 // ---- Apple/YouTube identification ----
+// Apple is the metadata oracle (official artist + track names) — NOT a
+// preview source anymore; the preview rung was retired in v2.3.1.
 async function appleIdentify(query) {
   const data = await fetchJson(ITUNES + "?term=" + encodeURIComponent(query) +
     "&limit=1&media=music&entity=song").catch(() => null);
   const hit = data?.results?.[0];
-  return hit ? { artist: hit.artistName, track: hit.trackName, previewUrl: hit.previewUrl } : null;
+  return hit ? { artist: hit.artistName, track: hit.trackName } : null;
 }
 
 // Identify the real track: YouTube first (it understands remix/feat
@@ -157,30 +163,26 @@ async function identifyTrack(query) {
   return apple ? { ...apple, youtube: null } : null;
 }
 
-// ---- rung 3: Apple preview + YouTube link ----
-async function previewAudio(query, identity) {
-  // The identity may have come from YouTube (no preview url) — ask Apple
-  // for the identified track so we can still send a real audio preview.
-  let apple = identity?.previewUrl ? identity : null;
-  if (!apple && identity?.artist && identity?.track) {
-    apple = await appleIdentify(identity.artist + " " + identity.track).catch(() => null);
-  }
-  if (!apple) apple = await appleIdentify(query).catch(() => null);
-  const video = identity?.youtube || (await youtubeSearch(query, 1).catch(() => null) || []).find(v => v && v.title && v.id);
-  if (apple?.previewUrl) {
+// ---- rung 4: the honest end — the identified track + its link ----
+// A snippet is not the song, so when nothing can deliver the full audio
+// the user gets the real title, artist and the YouTube link. Nothing else.
+async function linkOnlyResult(query, identity) {
+  const video = identity?.youtube ||
+    (await youtubeSearch(query, 1).catch(() => null) || []).find(v => v && v.title && v.id);
+  if (identity?.artist && identity?.track) {
     return {
-      title: apple.artist + " — " + apple.track,
-      audioUrl: validateHttpsUrl(apple.previewUrl, "audio preview"),
-      source: "Apple Music preview",
+      title: identity.artist + " — " + identity.track,
+      audioUrl: "",
+      source: "link",
       full: false,
       youtubeUrl: video ? "https://www.youtube.com/watch?v=" + video.id : ""
     };
   }
   if (video) {
     return {
-      title: video.title,
+      title: video.title.slice(0, 180),
       audioUrl: "",
-      source: "YouTube",
+      source: "link",
       full: false,
       youtubeUrl: "https://www.youtube.com/watch?v=" + video.id
     };
@@ -216,7 +218,9 @@ export async function youtubeSearch(query, limit = 5) {
   return videos;
 }
 
-// The public entry: rung after rung, first hit wins.
+// The public entry: rung after rung, first hit wins. Full-track tiers
+// (Audius, SoundCloud) need the OFFICIAL artist to verify the uploader,
+// so identification runs before them.
 export async function searchYouTubeAudio(query) {
   const search = String(query || "").trim();
   if (!search) throw new Error("Enter a song title or artist name.");
@@ -228,7 +232,13 @@ export async function searchYouTubeAudio(query) {
     if (nabees) return nabees;
   }
   const identity = await identifyTrack(search);
+  if (identity?.artist) {
+    const audius = await audiusFullTrack(search, identity.artist).catch(() => null);
+    if (audius) return audius;
+    const soundcloud = await soundcloudFullTrack(search, identity.artist).catch(() => null);
+    if (soundcloud) return soundcloud;
+  }
   const downloader = await publicDownloaderAudio(identity).catch(() => null);
   if (downloader) return downloader;
-  return previewAudio(search, identity);
+  return linkOnlyResult(search, identity);
 }

@@ -240,14 +240,14 @@ export default [
     name: "song",
     aliases: ["play2"],
     category: "Downloads",
-    description: "Send any song as audio — full track when available, preview + link otherwise.",
+    description: "Send any song as full audio — Audius and SoundCloud serve the real track; honest link otherwise.",
     run: async ctx => {
       const query = String(ctx.args || "").trim();
       if (!query) throw new Error("Usage: " + ctx.config.prefix + "song song title or artist");
       await ctx.reply("🎵 Finding your song: " + query.slice(0, 120) + "...");
       const result = await searchYouTubeAudio(query);
       if (!result.audioUrl && result.youtubeUrl) {
-        // nothing downloadable anywhere — at least hand over the link
+        // nothing downloadable anywhere — hand over the honest link box
         await ctx.reply(unicodeBox("🎵 SONG FOUND",
           result.title + "\n\nI could not get a downloadable audio for this one right now.\n🔗 " + result.youtubeUrl,
           { footer: true }));
@@ -257,13 +257,6 @@ export default [
         type: "audio/mpeg",
         extension: "mp3"
       });
-      if (!result.full) {
-        await ctx.reply(unicodeBox("🎵 PREVIEW MODE",
-          "That is a 30-second Apple Music preview of *" + result.title + "*.\n" +
-          (result.youtubeUrl ? "Full track: " + result.youtubeUrl + "\n" : "") +
-          "For the full file, try .song again with the artist name.",
-          { footer: false }));
-      }
     }
   },
   {

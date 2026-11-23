@@ -140,7 +140,7 @@ test(".help <command> opens a detail card, .menu <section> opens that section", 
   };
 
   await helpCommand.run({ ...base, args: "song" });
-  assert.ok(out.some(v => v) ? out.find(v => v.includes('Send any song as audio')) : ''.includes("Send any song as audio"), "help <command> shows a detail card");
+  assert.ok(out.find(v => v.includes("Send any song as full audio")), "help <command> shows a detail card");
 
   await menuCommand.run({ ...base, args: "downloads" });
 });
