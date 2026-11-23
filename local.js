@@ -161,6 +161,14 @@ export async function runLocalTerminal(options = {}) {
 
   runtime.on("connected", status => {
     console.log("\nDamzD connected" + (status.phoneNumber ? " as " + status.phoneNumber : "") + ".");
+    // Continuous online presence: re-publish after every reconnect when the
+    // owner turned it on with .online.
+    void (async () => {
+      try {
+        const { shouldPublishOnline } = await import("./src/damzd/presence.js");
+        if (shouldPublishOnline()) await runtime.socket?.sendPresenceUpdate("available");
+      } catch { /* cosmetic */ }
+    })();
     void sendConnectNote(runtime);
   });
   runtime.on("reconnecting", info => {

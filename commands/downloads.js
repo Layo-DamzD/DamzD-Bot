@@ -202,34 +202,64 @@ export default [
     run: async ctx => runAio(ctx, requirePlatformUrl(ctx, "X/Twitter", PLATFORM_HOSTS.twitter), "X / TWITTER")
   },
   {
-    name: "instagram",
+    name: "insta",
+    aliases: ["instagram"],
     category: "Downloads",
-    description: "Download public Instagram media using the all-in-one media provider.",
+    description: "Download Instagram media.",
     run: async ctx => runAio(ctx, requirePlatformUrl(ctx, "Instagram", PLATFORM_HOSTS.instagram), "INSTAGRAM")
   },
   {
-    name: "ytmp4",
-    aliases: ["yt", "ytdl"],
+    name: "yt",
+    aliases: ["ytmp4", "ytdl"],
     category: "Downloads",
-    description: "Download public YouTube media using the all-in-one media provider.",
+    description: "Download a YouTube video.",
     run: async ctx => runAio(ctx, requirePlatformUrl(ctx, "YouTube", PLATFORM_HOSTS.ytmp4), "YOUTUBE")
   },
   {
     name: "tiktok",
     aliases: ["ttdl"],
     category: "Downloads",
-    description: "Download public TikTok media using the all-in-one media provider.",
+    description: "Download a TikTok video.",
     run: async ctx => runAio(ctx, requirePlatformUrl(ctx, "TikTok", PLATFORM_HOSTS.tiktok), "TIKTOK")
   },
   {
-    name: "play2",
-    aliases: ["song", "music"],
-    aliases: ["song"],
+    name: "tiktok2",
     category: "Downloads",
-    description: "Search YouTube and send the matching track as MP3 using Ikyyxd.",
+    description: "Download a TikTok video (backup service).",
+    run: async ctx => {
+      const url = requirePlatformUrl(ctx, "TikTok", PLATFORM_HOSTS.tiktok);
+      await ctx.reply("🎬 Preparing the TikTok download (backup provider)...");
+      const payload = await requestExternalJson(
+        "https://tikwm.com/api/",
+        { url },
+        60000
+      );
+      const data = payload?.data || {};
+      if (payload?.code !== 0 || !data) {
+        throw new Error("The backup TikTok provider could not process that link. Try " +
+          ctx.config.prefix + "tiktok instead.");
+      }
+      const direct = data.hdplay || data.play || data.wmplay || "";
+      if (!direct) throw new Error("No downloadable video was returned. Try " + ctx.config.prefix + "tiktok instead.");
+      const videoUrl = direct.startsWith("http") ? direct : "https://tikwm.com" + direct;
+      const safeUrl = safeMediaUrl(videoUrl, "video");
+      if (!safeUrl) throw new Error("The provider returned an unsupported video URL.");
+      await sendDownloadedMedia(ctx, safeUrl,
+        data.title || "TikTok video", { type: "video/mp4", extension: "mp4" });
+      if (data.music && safeMediaUrl(data.music, "audio")) {
+        await ctx.send({ audio: { url: data.music }, mimetype: "audio/mpeg", ptt: false })
+          .catch(() => {});
+      }
+    }
+  },
+  {
+    name: "song",
+    aliases: ["play2"],
+    category: "Downloads",
+    description: "Send any song as a full audio file.",
     run: async ctx => {
       const query = String(ctx.args || "").trim();
-      if (!query) throw new Error("Usage: " + ctx.config.prefix + "play2 song title or artist");
+      if (!query) throw new Error("Usage: " + ctx.config.prefix + "song song title or artist");
       await ctx.reply("🎵 Searching YouTube and preparing the audio...");
       const result = await searchYouTubeAudio(query);
       await sendDownloadedMedia(ctx, result.audioUrl, result.title, {
@@ -247,7 +277,24 @@ export default [
   {
     name: "video",
     category: "Downloads",
-    description: "Download a YouTube video using the FEI API.",
-    run: runYouTubeVideo
+    description: "Download a YouTube video in the best available quality.",
+    run: async ctx => {
+      const url = requirePlatformUrl(ctx, "YouTube", PLATFORM_HOSTS.ytmp4);
+      await ctx.reply("🎬 Preparing the YouTube video download...");
+      const payload = await requestApiJson("ytv", { url }, 90000).catch(() => null);
+      const data = payload?.results || payload?.result || payload?.data || {};
+      const downloadUrl = safeMediaUrl(data.downloadUrl || data.download || data.url, "video");
+      if (!downloadUrl) {
+        // The FEI video endpoint is unavailable — fall back to the
+        // all-in-one provider so the command still answers.
+        await runAio(ctx, url, "YOUTUBE HQ");
+        return;
+      }
+      await sendDownloadedMedia(ctx, downloadUrl, data.title || "YouTube video", {
+        type: "video/mp4",
+        extension: "mp4",
+        quality: data.quality || "available"
+      });
+    }
   }
 ];

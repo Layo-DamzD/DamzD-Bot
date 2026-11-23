@@ -262,7 +262,11 @@ const shortcuts = [
   ["foxnews", "fox", []],
   ["skynews", "sky", ["sky"]],
   ["dw", "dw", []],
-  ["punchnews", "punch", ["punch", "punchng"]]
+  ["punchnews", "punch", ["punch", "punchng"]],
+  ["france24", "f24", ["f24"]],
+  ["washingtonpost", "wp", ["wapo"]],
+  ["timesofindia", "toi", ["toi"]],
+  ["abcnews", "abc", ["abc"]]
 ];
 
 export default [

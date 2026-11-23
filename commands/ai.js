@@ -48,9 +48,10 @@ function createSimpleCommand({ name, aliases = [], title, endpoint, params, exte
   };
 }
 
-function createOmegaCommand({ name, title, endpoint, params, paths, description }) {
+function createOmegaCommand({ name, aliases = [], title, endpoint, params, paths, description }) {
   return {
     name,
+    aliases,
     category: "AI & Chat",
     description,
     run: async ctx => {
@@ -66,34 +67,40 @@ export async function requestSummary(prompt) {
   const source = String(prompt || "").trim();
   if (!source) throw new Error("The summary prompt is empty.");
   const style = "Summarize clearly in about 180–300 words. Do not invent details. Use concise bullets and moderate spacing. Use single asterisks for WhatsApp bold.";
-  try {
-    const payload = await requestApiJson("gptlogic", { q: source, prompt: style });
-    return extractApiText(payload);
-  } catch {
-    const payload = await requestExternalJson(OMEGATECH + "/ai/Qwen-Claude-Haiku", {
-      message: source + "\n\n" + style,
-      model: "qwen"
-    });
-    return valueAt(payload, ["answer", "data.answer", "reply", "data.reply", "response"]) || extractApiText(payload);
-  }
+  const payload = await requestExternalJson(OMEGATECH + "/ai/Deepseek", {
+    action: "chat",
+    message: source + "\n\n" + style
+  });
+  return valueAt(payload, ["result", "answer", "data.answer", "reply", "data.reply", "response"]) ||
+    extractApiText(payload);
 }
 
 export default [
-  createSimpleCommand({
-    name: "ai",
-    aliases: ["claude"],
-    title: "🧠 AI ASSISTANT",
-    endpoint: "claude-haiku",
-    params: prompt => ({ q: prompt }),
-    description: "Ask the default Claude-powered AI assistant."
+  createOmegaCommand({
+    name: "claude",
+    aliases: ["ai"],
+    title: "🧠 CLAUDE OPUS",
+    endpoint: "/ai/Claude",
+    params: message => ({ action: "chat", message }),
+    paths: ["result", "answer", "data.answer", "reply", "data.reply"],
+    description: "Claude Opus 5.5 — careful, nuanced reasoning."
   }),
-  createSimpleCommand({
-    name: "ask",
-    aliases: ["gemini"],
+  createOmegaCommand({
+    name: "gemini",
+    aliases: ["ask"],
     title: "✨ GEMINI",
-    endpoint: "gemini",
-    params: prompt => ({ q: prompt }),
-    description: "Ask the alternate Gemini AI assistant."
+    endpoint: "/ai/Gemini",
+    params: message => ({ action: "chat", message }),
+    paths: ["result", "answer", "data.answer", "reply", "data.reply"],
+    description: "Gemini 4 Argon — creative, imaginative answers."
+  }),
+  createOmegaCommand({
+    name: "grok",
+    title: "🤖 GROK",
+    endpoint: "/ai/Grok",
+    params: message => ({ action: "chat", message }),
+    paths: ["result", "answer", "data.answer", "reply", "data.reply"],
+    description: "Witty, bold answers, Grok-style (my built-in brains)."
   }),
   {
     name: "gpt",
@@ -106,32 +113,62 @@ export default [
       const style = styleParts.join("|").trim() || "be friendly and helpful";
       if (!question) throw new Error("Provide a question before the optional style.");
       if (style.length > 300) throw new Error("Keep the response style under 300 characters.");
-      const payload = await requestApiJson("gptlogic", { q: question, prompt: style });
-      await sendAnswer(ctx, "🧠 GPT", extractApiText(payload));
+    const payload = await requestExternalJson(OMEGATECH + "/ai/Claude", {
+      action: "chat",
+      message: question + "\n\n(Respond in this style: " + style + ")"
+    });
+    await sendAnswer(ctx, "🧠 GPT", valueAt(payload, ["result", "answer", "data.answer", "reply"]) ||
+      extractApiText(payload));
     }
   },
-  createSimpleCommand({
+  {
     name: "chatgpt",
-    title: "💬 CHATGPT",
-    endpoint: "https://eliteprotech-apis.zone.id/ai/chatgpt",
-    params: prompt => ({ prompt }),
-    external: true,
-    description: "Ask the ChatGPT endpoint a question."
-  }),
-  createSimpleCommand({
+    category: "AI & Chat",
+    description: "Smart router — reads your question and picks the best brain for it: code, maths, creative or quick answers",
+    run: async ctx => {
+      const prompt = requirePrompt(ctx);
+      const lower = prompt.toLowerCase();
+      const wantsMaths = /\d\s*[-+*/^%]\s*\d|\bsolve|equation|integral|derivative|percentage|fraction\b/.test(lower);
+      const wantsCode = /\bcode|function|bug|error|javascript|python|css|html|sql|api|regex|compile|debug\b/.test(lower);
+      const wantsCreative = /\bstory|poem|poetry|lyrics|creative|imagine|caption|slogan|name ideas|essay\b/.test(lower);
+      const endpoint = wantsMaths ? "/ai/Deepseek"
+        : wantsCode ? "/ai/Claude"
+        : wantsCreative ? "/ai/Gemini"
+        : "/ai/Claude";
+      const title = wantsMaths ? "🧠 SMART ROUTE → DEEPSEEK (MATHS)"
+        : wantsCode ? "🧠 SMART ROUTE → CLAUDE (CODE)"
+        : wantsCreative ? "🧠 SMART ROUTE → GEMINI (CREATIVE)"
+        : "🧠 SMART ROUTE → CLAUDE";
+      const payload = await requestExternalJson(OMEGATECH + endpoint, {
+        action: "chat",
+        message: prompt
+      });
+      const answer = valueAt(payload, ["result", "answer", "data.answer", "reply", "data.reply"]) ||
+        extractApiText(payload);
+      await sendAnswer(ctx, title, answer);
+    }
+  },
+  {
     name: "mathgpt",
-    title: "➗ MATHGPT",
-    endpoint: "https://eliteprotech-apis.zone.id/ai/mathgpt",
-    params: prompt => ({ q: prompt }),
-    external: true,
-    description: "Solve a maths problem with step-by-step guidance."
-  }),
-  createSimpleCommand({
+    category: "AI & Chat",
+    description: "Solves maths step by step",
+    run: async ctx => {
+      const prompt = requirePrompt(ctx);
+      const payload = await requestExternalJson(OMEGATECH + "/ai/Deepseek", {
+        action: "chat",
+        message: "Solve this step by step, showing every step clearly. End with the final answer on its own line.\n\n" + prompt
+      });
+      const answer = valueAt(payload, ["result", "answer", "data.answer", "reply", "data.reply"]) ||
+        extractApiText(payload);
+      await sendAnswer(ctx, "➗ MATHGPT", answer);
+    }
+  },
+  createOmegaCommand({
     name: "deepseek",
     title: "🧠 DEEPSEEK",
-    endpoint: "https://eliteprotech-apis.zone.id/ai/deepseekai",
-    params: prompt => ({ prompt }),
-    external: true,
+    endpoint: "/ai/Deepseek",
+    params: message => ({ action: "chat", message }),
+    paths: ["result", "answer", "data.answer", "reply", "data.reply"],
     description: "Ask DeepSeek a question."
   }),
   {
@@ -148,8 +185,12 @@ export default [
       const source = raw.slice(separator + 1).trim();
       const query = "Translate the following text into " + language +
         ". Return only the translation, with no explanation:\n\n" + source;
-      const payload = await requestApiJson("claude-haiku", { q: query });
-      await sendAnswer(ctx, "🌍 TRANSLATION · " + language.toUpperCase(), extractApiText(payload));
+      const payload = await requestExternalJson(OMEGATECH + "/ai/Claude", {
+        action: "chat",
+        message: query
+      });
+      await sendAnswer(ctx, "🌍 TRANSLATION · " + language.toUpperCase(),
+        valueAt(payload, ["result", "answer", "data.answer", "reply"]) || extractApiText(payload));
     }
   },
   {
@@ -163,12 +204,13 @@ export default [
     }
   },
   createOmegaCommand({
-    name: "fable5",
+    name: "fable",
+    aliases: ["fable5"],
     title: "🧠 CLAUDE FABLE 5",
     endpoint: "/ai/Secret",
     params: message => ({ action: "chat", message }),
-    paths: ["data.reply", "reply", "data.response"],
-    description: "Ask the Claude Fable 5 model a question."
+    paths: ["data.reply", "reply", "data.response", "result"],
+    description: "Claude Fable 5.2 — the storyteller, best for stories & creative writing."
   }),
   createOmegaCommand({
     name: "qwen",

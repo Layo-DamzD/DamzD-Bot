@@ -25,11 +25,16 @@ here is theirs, untouched) with the **DamzD skin and command list on top**.
 - **`.onlineusers` / `.ghost` / `.top`** — persistent group activity with
   honest LID resolution; `onlineusers` and `ghost` also answer **without the
   dot**.
-- **`.song` / `.music`** ride the base's play2 engine (YouTube MP3);
-  **`.yt` / `.ytdl`** ride ytmp4 — the father-repo download stack.
-- **Menu = the DamzD list** — 12 sections generated from the v1.4.45 command
-  set. Base commands outside the plan keep working but are hidden from
-  `.menu`; no command file is ever deleted.
+- **`.song` / `.play2`** ride the base's play2 engine (YouTube MP3);
+  **`.yt` / `.ytmp4` / `.ytdl`** ride the all-in-one downloader, with
+  **`.tiktok2`** as a second TikTok provider.
+- **Menu = everything** — 16 sections, all 281 commands (the deployed
+  v1.4.45 list merged with the FEI base, deduped). Nothing is hidden from
+  `.menu`; the same list ships as `download/DamzD-Commands.txt`.
+- **New in 2.1.0** — the full Channel (cfollow/cpost/creact/…), Privacy
+  (pin/mute/archive/star/block/antiedit/…), Status presence (typing/
+  recording/online/pres), sticker, ssweb, bible, couplepp, pp, shortenurl,
+  word-chain lobby and AI-router sets, all registered on the same loader.
 
 ## The Baileys patch
 

@@ -22,7 +22,7 @@ function statusSummary(settings, prefix) {
     "Keyword filter: " + (settings.statusreactkeys.length ? settings.statusreactkeys.join(", ") : "all statuses"),
     "",
     "Toggle viewing: " + prefix + "autostatus on/off",
-    "Toggle reactions: " + prefix + "statusreact on/off",
+    "Toggle reactions: " + prefix + "statusreacton on/off",
     "Set emoji pool: " + prefix + "statusreactmode ❤️,🔥,💯",
     "Use built-in random pool: " + prefix + "statusreactmode random",
     "Filter reactions: " + prefix + "statusreactkeys word1, word2",
@@ -69,16 +69,16 @@ export default [
     }
   },
   {
-    name: "statusreact",
+    name: "statusreacton",
     category: "Status",
-    description: "Toggle automatic reactions to new WhatsApp statuses.",
+    description: "Toggle status auto-reactions.",
     run: async ctx => {
-      if (!await ownerOnly(ctx, "automatic status reactions")) return;
+      if (!await ownerOnly(ctx, "status auto-reactions")) return;
       const raw = String(ctx.args || "").trim().toLowerCase();
       if (!["on", "off"].includes(raw)) {
         const settings = await getStatusAutomationSettings();
         await ctx.reply("Automatic status reactions: " + (settings.statusreact ? "ON ✅" : "OFF 🔕") +
-          "\nUsage: " + ctx.config.prefix + "statusreact on/off");
+          "\nUsage: " + ctx.config.prefix + "statusreacton on/off");
         return;
       }
       await setStatusAutomationSetting("statusreact", raw === "on");

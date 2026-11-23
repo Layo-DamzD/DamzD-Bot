@@ -62,10 +62,10 @@ function statusText(prefix, enabled, target) {
 }
 
 export default {
-  name: "antidelete",
-  aliases: ["antidel"],
-  category: "Chat & Privacy",
-  description: "Temporarily cache enabled-chat messages and report when one is deleted for everyone.",
+  name: "antidel",
+  aliases: ["antidelete"],
+  category: "Privacy",
+  description: "Alert me when someone deletes a message.",
   run: async ctx => {
     if (!await canManage(ctx, "anti-delete")) return;
 
