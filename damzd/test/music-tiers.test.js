@@ -1,13 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-// The v2.3.1 music-tier pick logic. These guards are what keep the
-// cloud-safe tiers honest: a DJ's remix, a 30-second label snippet, or an
-// encrypted-HLS-only upload must NEVER stand in for the real full track.
+// The v2.3.2 music-tier pick logic. These guards are what keep the
+// cloud-safe tiers honest: a DJ's remix, a 30-second label snippet, an
+// encrypted-HLS-only upload, a tribute band, or a DJ medley must NEVER
+// stand in for the real full track.
 import {
   artistMatches,
   pickAudiusTrack,
-  pickSoundcloudTrack
+  pickSoundcloudTrack,
+  titleMatches,
+  scUploaderOk,
+  uploaderIsTheArtist
 } from "../lib/render-music.js";
 
 test("artistMatches: the official artist matches its own uploads", () => {
@@ -101,4 +105,39 @@ test("pickSoundcloudTrack: encrypted-hls-only and foreign uploads rejected", () 
       media: { transcodings: [{ format: { protocol: "progressive" }, url: "https://x" }] }
     }
   ], "Burna Boy"), null, "uploader must match the artist");
+});
+
+test("titleMatches: medleys and DJ blends are rejected outright", () => {
+  assert.equal(titleMatches("Levitating", "One Kiss / Whatcha Doing / Levitating (DJ Set)"), false);
+  assert.equal(titleMatches("So What", "So What vs. Giant Steps (Mashup)"), false);
+  assert.equal(titleMatches("Take Five", "Jazz Classics Medley"), false);
+  // real single titles still match
+  assert.ok(titleMatches("Last Last", "Last Last"));
+  assert.ok(titleMatches("Lonely At The Top", "Lonely At The Top (Remix)")); // variant labels checked separately
+  assert.ok(titleMatches("", "Anything"), "no known title means artist check alone");
+});
+
+test("scUploaderOk: tribute bands never stand in for a verified act", () => {
+  const items = [
+    { kind: "track", user: { username: "Killer Queen Band Page", verified: false, followers_count: 85 } },
+    { kind: "track", user: { username: "Queen Official", verified: true, followers_count: 500000 } }
+  ];
+  assert.equal(scUploaderOk(items, "Queen", items[0].user), false);
+  assert.ok(scUploaderOk(items, "Queen", items[1].user));
+});
+
+test("scUploaderOk: indie artists pass on their own strictly-named account", () => {
+  const indie = [{ kind: "track", user: { username: "Feli Nuna", verified: false, followers_count: 800 } }];
+  assert.ok(scUploaderOk(indie, "Feli Nuna", indie[0].user));
+  const fanPage = [{ kind: "track", user: { username: "Feli Nuna Fan Page", verified: false, followers_count: 20 } }];
+  assert.equal(scUploaderOk(fanPage, "Feli Nuna", fanPage[0].user), false);
+});
+
+test("uploaderIsTheArtist: tribute words and partial names fail", () => {
+  assert.ok(uploaderIsTheArtist("Feli Nuna", { username: "Feli Nuna" }));
+  assert.ok(uploaderIsTheArtist("Feli Nuna", { username: "feli nuna official" }));
+  assert.equal(uploaderIsTheArtist("Led Zeppelin", { username: "Boot Led Zeppelin" }), false);
+  assert.equal(uploaderIsTheArtist("Queen", { username: "Queen Band Tribute" }), false);
+  // multi-word artist: every word must be in the account name
+  assert.equal(uploaderIsTheArtist("Burna Boy", { username: "Burna" }), false);
 });

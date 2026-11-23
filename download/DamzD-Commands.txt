@@ -1,6 +1,6 @@
 ================================================================
-  DamzD — complete command list (v2.3.1)
-  Generated 2026-11-23 22:35 UTC
+  DamzD — complete command list (v2.3.2)
+  Generated 2026-11-23 23:31 UTC
 ================================================================
 
 183 commands in 16 sections.
@@ -331,7 +331,7 @@ DOWNLOADS  (10 commands)
 .tiktok2
     Download a TikTok video (backup service).
 .song  (also: .play2)
-    Send any song as full audio — Audius and SoundCloud serve the real track; honest link otherwise.
+    Send any song as full audio — Audius, SoundCloud and JioSaavn serve the real track; honest link otherwise.
 .ytsearch
     Search YouTube and list matching videos without downloading them.
 .video

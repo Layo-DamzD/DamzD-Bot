@@ -240,12 +240,27 @@ export default [
     name: "song",
     aliases: ["play2"],
     category: "Downloads",
-    description: "Send any song as full audio — Audius and SoundCloud serve the real track; honest link otherwise.",
+    description: "Send any song as full audio — Audius, SoundCloud and JioSaavn serve the real track; honest link otherwise.",
     run: async ctx => {
       const query = String(ctx.args || "").trim();
       if (!query) throw new Error("Usage: " + ctx.config.prefix + "song song title or artist");
       await ctx.reply("🎵 Finding your song: " + query.slice(0, 120) + "...");
       const result = await searchYouTubeAudio(query);
+      // the HLS tier delivers the audio as an in-memory buffer
+      if (result.audioBuffer?.length) {
+        const cleanTitle = String(result.title || query).replace(/[\r\n*_`~]/g, " ").trim().slice(0, 150);
+        const caption = unicodeBox("📥 DOWNLOAD READY",
+          "✅ *" + cleanTitle + "*\n📦 Size: " + (result.audioBuffer.length / 1048576).toFixed(1) + " MB",
+          { footer: true });
+        await ctx.send({
+          audio: result.audioBuffer,
+          mimetype: result.mimetype || "audio/mp4",
+          fileName: safeFileName(cleanTitle, "DamzD-song") + ".m4a",
+          ptt: false
+        });
+        await ctx.reply(caption);
+        return;
+      }
       if (!result.audioUrl && result.youtubeUrl) {
         // nothing downloadable anywhere — hand over the honest link box
         await ctx.reply(unicodeBox("🎵 SONG FOUND",

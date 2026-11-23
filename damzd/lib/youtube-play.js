@@ -1,25 +1,34 @@
-// The .song engine — the v2.3.1 ladder, every rung verified live:
+// The .song engine — the v2.3.2 ladder, every rung verified live, and
+// KEYLESS FIRST (no NABEES key needed for any of the tiers):
 //
-//   1) NABEES all-in-one (apis.nabeestech.com) — the owner's preferred
-//      provider; needs NABEES_API_KEY. Full YouTube-to-mp3 conversion.
-//      (Currently hard-down HTTP 530 — the rung re-arms itself whenever
-//      the service comes back; no code change needed.)
-//   2) Cloud-safe full-track tiers (lib/render-music.js): Audius first
-//      (keyless decentralized nodes — Render's datacenter IPs never get
-//      blocked), then SoundCloud (web player's own client_id; only full
-//      uploads with a progressive stream pass). Both verify the UPLOADER
-//      against the officially identified artist and demand ≥90 seconds,
-//      so remixes, covers and label snippets never stand in for the song.
-//   3) Owner-suggested public downloaders over the identified video:
-//      Siputzx, Dark Yasiya, Izumi, Gifted — usually dead, harmless to try.
-//   4) The honest end: identified title + the YouTube link. No 30-second
-//      Apple preview — the owner retired it; a snippet is not the song.
+//   1) Audius — keyless decentralized nodes; full mp3 for artists whose
+//      real uploads sit there. Render's datacenter IPs never get blocked.
+//   2) SoundCloud — the full-upload tier: progressive transcodings (direct
+//      mp3 bytes), then plain unencrypted HLS (mp4 segments concatenated
+//      in-memory — the phonk tier). Label blocks (30s snippets, encrypted
+//      HLS) are rejected honestly.
+//   3) JioSaavn — the licensed-catalog tier (keyless): 320kbps full audio
+//      for the catalogs it holds (classics, jazz standards, licensed
+//      international releases). Covers and karaoke variants are rejected.
+//   4) NABEES all-in-one — the owner's preferred provider, OPTIONAL: set
+//      NABEES_API_KEY and it runs FIRST instead (YouTube-to-mp3 covers
+//      everything it can reach). (Currently hard-down HTTP 530 — the rung
+//      re-arms itself when the service returns.)
+//   5) Owner-suggested public downloaders over the identified video —
+//      usually dead, harmless to try.
+//   6) The honest end: identified title + the YouTube link. No 30-second
+//      previews — a snippet is not the song.
 //
-// Search (for .ytsearch) uses YouTube's own innertube WEB API — the old
-// eliteprotech provider is gone. No JioSaavn: the owner does not want
-// Bollywood/regional substitutes standing in for real tracks.
+// Every tier verifies the UPLOADER against the officially identified
+// artist, demands >=90 seconds, and matches the track title — so remixes,
+// covers and label snippets never stand in for the real song.
+//
+// Search (for .ytsearch) uses YouTube's own innertube WEB API. No
+// JioSaavn-only fallback to Bollywood/regional substitutes: the catalog
+// must hold the REAL artist or the ladder falls through.
 import { validateHttpsUrl } from "./api-client.js";
-import { audiusFullTrack, soundcloudFullTrack } from "./render-music.js";
+import { audiusFullTrack, soundcloudFullTrack, soundcloudHlsTrack } from "./render-music.js";
+import { saavnFullTrack } from "./saavn-music.js";
 
 const NABEES_AIO = "https://apis.nabeestech.com/api/v1/download/aio";
 const ITUNES = "https://itunes.apple.com/search";
@@ -218,9 +227,11 @@ export async function youtubeSearch(query, limit = 5) {
   return videos;
 }
 
-// The public entry: rung after rung, first hit wins. Full-track tiers
-// (Audius, SoundCloud) need the OFFICIAL artist to verify the uploader,
-// so identification runs before them.
+// The public entry: rung after rung, first hit wins. The keyless tiers
+// (Audius, SoundCloud, JioSaavn) need the OFFICIAL artist and track to
+// verify the upload, so identification runs first. NABEES (with a key)
+// still runs FIRST when configured — it is the owner's preferred
+// provider and covers everything YouTube-to-mp3 can reach.
 export async function searchYouTubeAudio(query) {
   const search = String(query || "").trim();
   if (!search) throw new Error("Enter a song title or artist name.");
@@ -235,8 +246,12 @@ export async function searchYouTubeAudio(query) {
   if (identity?.artist) {
     const audius = await audiusFullTrack(search, identity.artist).catch(() => null);
     if (audius) return audius;
-    const soundcloud = await soundcloudFullTrack(search, identity.artist).catch(() => null);
+    const soundcloud = await soundcloudFullTrack(search, identity.artist, identity.track || "").catch(() => null);
     if (soundcloud) return soundcloud;
+    const hls = await soundcloudHlsTrack(search, identity.artist, identity.track || "").catch(() => null);
+    if (hls) return hls;
+    const saavn = await saavnFullTrack(search, identity.artist, identity.track || search).catch(() => null);
+    if (saavn) return saavn;
   }
   const downloader = await publicDownloaderAudio(identity).catch(() => null);
   if (downloader) return downloader;
