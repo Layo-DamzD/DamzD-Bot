@@ -56,7 +56,7 @@ async function requireGroupAdmin(ctx, requireBotAdmin = false) {
   );
 
   if (requireBotAdmin && !botIsAdmin) {
-    await ctx.reply("Please make FEI XMD a group admin before using this command.");
+    await ctx.reply("Please make DamzD a group admin before using this command.");
     return null;
   }
 

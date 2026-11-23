@@ -1,10 +1,10 @@
 export default {
   name: "privacy",
   category: "Chat & Privacy",
-  description: "Explain the privacy safeguards in this public FEI XMD build.",
+  description: "Explain the privacy safeguards in this public DamzD build.",
   run: async ctx => {
     await ctx.reply([
-      "🔒 *FEI XMD PRIVACY*",
+      "🔒 *DamzD PRIVACY*",
       "",
       "• This public build does not collect group-chat history or produce member activity rankings.",
       "• Message-specific commands run only when someone invokes them on a message.",

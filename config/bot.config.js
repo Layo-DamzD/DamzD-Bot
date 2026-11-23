@@ -27,5 +27,5 @@ export default Object.freeze({
     process.env.BOT_IMAGE_URL ||
     "https://res.cloudinary.com/dqqyvozdw/image/upload/v1792848652/arbeimjfqkkfpn9zvfhf.png"
   ).trim(),
-  botUrl: String(process.env.BOT_URL || "https://fei-xmd.benfeilab.com").trim()
+  botUrl: String(process.env.BOT_URL || "").trim()
 });

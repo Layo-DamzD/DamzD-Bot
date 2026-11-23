@@ -222,7 +222,7 @@ export default [
 
       try {
         await ctx.sock.sendMessage(target, viewOncePayload(result));
-        await ctx.reply("✅ The media was sent to your private chat with FEI XMD.");
+        await ctx.reply("✅ The media was sent to your private chat with DamzD.");
       } catch (error) {
         await ctx.reply("⚠️ Could not send the media to your DM: " +
           String(error?.message || error).slice(0, 180));

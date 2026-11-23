@@ -8,7 +8,7 @@ import {
 const ANILIST = "https://graphql.anilist.co";
 const NEKOS_ROOT = "https://nekos.best/api/v2";
 const APP_HEADERS = {
-  "user-agent": "BenfeiAnime (https://benfeitech.com)",
+  "user-agent": "DamzDAnime (https://github.com/Layo-DamzD/DamzD-Bot)",
   accept: "application/json"
 };
 const TIMEOUT_MS = 20000;

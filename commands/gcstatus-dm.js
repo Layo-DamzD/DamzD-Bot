@@ -56,10 +56,10 @@ export default {
   name: "gcstatusdm",
   aliases: ["dmgcstatus"],
   category: "Status",
-  description: "Post a group status from a private chat with FEI XMD.",
+  description: "Post a group status from a private chat with DamzD.",
   run: async ctx => {
     if (String(ctx.jid || "").endsWith("@g.us")) {
-      await ctx.reply("Use " + ctx.config.prefix + "gcstatusdm in a private chat with FEI XMD.");
+      await ctx.reply("Use " + ctx.config.prefix + "gcstatusdm in a private chat with DamzD.");
       return;
     }
     if (!ctx.owner) {
@@ -139,7 +139,7 @@ export default {
         ? "\nBackground: " + posted.color.name + " (" + posted.color.hex + ")"
         : "";
       await ctx.reply("✅ Group status posted successfully.\nGroup: " + target.subject +
-        background + "\n\n⚡ *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ʙᴇɴꜰᴇɪ ᴛᴇᴄʜ*");
+        background + "\n\n⚡ *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ɢʀᴇᴀᴛ ᴅᴀᴍᴢᴅ*");
     } catch (error) {
       await ctx.reply("⚠️ Failed to post status to " + target.subject + ": " +
         String(error?.message || error).slice(0, 220));

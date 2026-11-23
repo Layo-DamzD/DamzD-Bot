@@ -7,7 +7,7 @@ import {
 
 const HEADERS = {
   accept: "application/json, text/plain, */*",
-  "user-agent": "FEI-XMD-Fun/2.0 (+https://github.com/Benfeitech/FEI-XMD)"
+  "user-agent": "FEI-XMD-Fun/2.0 (+https://github.com/Layo-DamzD/DamzD-Bot)"
 };
 const TIMEOUT_MS = 15000;
 

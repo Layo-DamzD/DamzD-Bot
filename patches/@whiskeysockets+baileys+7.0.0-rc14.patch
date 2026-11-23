@@ -1,0 +1,25 @@
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js b/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js
+--- a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js
+@@ -1306,9 +1306,19 @@
+                         // Check if this is eligible for placeholder resend (matching WA Web filters).
+                         const unavailableNode = getBinaryNodeChild(node, 'unavailable');
+                         const unavailableType = unavailableNode?.attrs?.type;
++                        // DamzD patch: stock skips view_once_unavailable_fanout
++                        // here (matching WA Web's privacy filter), which left the
++                        // companion blind to view-onces entirely — no upsert, no
++                        // cache, no recovery. This bot's whole purpose is
++                        // view-once recovery, so view-onces are NOT excluded:
++                        // the placeholder resend is requested, the primary phone
++                        // re-serves the full media, and the companion's normal
++                        // message path (messages.upsert -> stash -> capture)
++                        // fires. The phone still decides whether to comply
++                        // (un-opened view-onces only), so view-once privacy is
++                        // preserved at the source.
+                         if (unavailableType === 'bot_unavailable_fanout' ||
+-                            unavailableType === 'hosted_unavailable_fanout' ||
+-                            unavailableType === 'view_once_unavailable_fanout') {
++                            unavailableType === 'hosted_unavailable_fanout') {
+                             logger.debug({ msgId: msg.key.id, unavailableType }, 'skipping placeholder resend for excluded unavailable type');
+                             acked = true;
+                             return sendMessageAck(node);

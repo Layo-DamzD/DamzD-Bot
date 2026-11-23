@@ -53,7 +53,7 @@ async function requireGroupAdmin(ctx, requireBotAdmin = true) {
   );
 
   if (requireBotAdmin && !botIsAdmin) {
-    await ctx.reply("⛔ Please make FEI XMD a group admin before using this command.");
+    await ctx.reply("⛔ Please make DamzD a group admin before using this command.");
     return null;
   }
 
@@ -160,10 +160,10 @@ export default [
   {
     name: "leave",
     category: "Group",
-    description: "Make FEI XMD leave the current group (group-admin only).",
+    description: "Make DamzD leave the current group (group-admin only).",
     run: async ctx => {
       if (!await requireGroupAdmin(ctx, false)) return;
-      await ctx.reply("👋 FEI XMD is leaving this group.");
+      await ctx.reply("👋 DamzD is leaving this group.");
       await ctx.sock.groupLeave(ctx.jid);
     }
   }

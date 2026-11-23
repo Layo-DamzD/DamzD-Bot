@@ -11,6 +11,8 @@ import { loadCommands } from "./handlers/command-loader.js";
 import { createWhatsAppRuntime } from "./lib/whatsapp-runtime.js";
 import { initViewOnceStore } from "./src/damzd/viewonce.js";
 import { initActivityStore } from "./src/damzd/activity.js";
+import { applyMenuPlan } from "./src/damzd/menu-plan.js";
+import { startDashboardServer } from "./src/dashboard.js";
 
 // The DamzD connect note: picture first, then the status card, into the
 // owner's own chat on every real connect — throttled to one a minute so a
@@ -66,14 +68,23 @@ async function sendConnectNote(runtime) {
     const number = String(config.ownerNumber || "").replace(/\D/g, "");
     if (!number) return;
     const own = number + "@s.whatsapp.net";
-    let imageBuffer = null;
-    try { imageBuffer = fs.readFileSync(path.resolve(process.cwd(), "assets", "bot-image.png")); } catch { /* fall back to the configured URL */ }
-    if (imageBuffer) {
-      await sock.sendMessage(own, { image: imageBuffer, caption: "🤖 " + config.name + " is online" });
-    } else if (config.imageUrl) {
-      await sock.sendMessage(own, { image: { url: config.imageUrl }, caption: "🤖 " + config.name + " is online" });
-    }
-    await sock.sendMessage(own, { text: connectCard() });
+    const note = connectCard();
+    // One message: the picture with the status card as its caption — the
+    // split text-then-image send read like two different bots. The picture
+    // races an 8s timer with a text-only fallback and the send retries once,
+    // so the owner always hears the bot come online.
+    const sendNote = async () => {
+      let picture = null;
+      try { picture = fs.readFileSync(path.resolve(process.cwd(), "assets", "bot-image.png")); } catch { /* fall back below */ }
+      if (!picture && config.imageUrl) {
+        picture = { url: config.imageUrl };
+      }
+      return picture
+        ? sock.sendMessage(own, { image: picture, caption: note })
+        : sock.sendMessage(own, { text: note });
+    };
+    await Promise.race([sendNote(), new Promise(resolve => setTimeout(resolve, 8000))])
+      .catch(() => new Promise(resolve => setTimeout(resolve, 2500)).then(() => sendNote()));
   } catch { /* the note is cosmetic — never block the runtime */ }
 }
 
@@ -87,6 +98,9 @@ function isValidPhone(value) {
 
 export async function runLocalTerminal(options = {}) {
   const { commands, lookup } = await loadCommands();
+  // The menu shows the DamzD command list; base commands outside the plan
+  // keep working but are hidden from .menu.
+  const hiddenCount = applyMenuPlan(commands);
   const sessionDirectory = path.resolve(String(
     options.sessionDirectory ||
     process.env.FEI_SESSION_DIR ||
@@ -108,6 +122,17 @@ export async function runLocalTerminal(options = {}) {
     sessionDirectory
   });
 
+  // The pairing dashboard — the same website as the old deploy. Serves "/",
+  // "/status" and "/health"; Render's health check hits /health.
+  const dashboardPort = Number(process.env.PORT || 3000);
+  startDashboardServer({
+    runtime,
+    config,
+    commandCount: commands.filter(command => !command.hidden).length,
+    sessionDirectory,
+    port: dashboardPort
+  });
+
   let shuttingDown = false;
   let rl = null;
 
@@ -120,7 +145,7 @@ export async function runLocalTerminal(options = {}) {
       rl = null;
     }
     await runtime.stop().catch(error => {
-      console.warn("Could not stop FEI XMD cleanly:", error && error.message || error);
+      console.warn("Could not stop DamzD cleanly:", error && error.message || error);
     });
   }
 
@@ -152,7 +177,8 @@ export async function runLocalTerminal(options = {}) {
     console.log("\n╭━━〔 DamzD · LOCAL RUNTIME 〕━━┈⊷");
     console.log("Baileys: @whiskeysockets/baileys (official npm package)");
     console.log("Session directory: " + sessionDirectory);
-    console.log("Loaded " + commands.length + " command module(s).");
+    console.log("Loaded " + commands.length + " command module(s) (" + (commands.length - hiddenCount) + " on the DamzD menu).");
+    console.log("Dashboard: http://localhost:" + dashboardPort + " — pair and watch status there.");
     console.log("Press Ctrl+C to stop the runtime.\n");
 
     await runtime.start();

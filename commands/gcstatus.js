@@ -27,7 +27,7 @@ export default {
         ? "\nBackground: " + posted.color.name + " (" + posted.color.hex + ")"
         : "";
       await ctx.reply("✅ Group status posted successfully." + background +
-        "\n\n⚡ *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ʙᴇɴꜰᴇɪ ᴛᴇᴄʜ*");
+        "\n\n⚡ *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ɢʀᴇᴀᴛ ᴅᴀᴍᴢᴅ*");
     } catch (error) {
       await ctx.reply("⚠️ Could not post the group status: " +
         String(error?.message || error).slice(0, 220));

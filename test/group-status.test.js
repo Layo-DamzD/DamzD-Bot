@@ -31,7 +31,7 @@ test("group status color parser supports names, custom HEX and random selection"
   assert.equal(GROUP_STATUS_COLORS.length, 11);
 });
 
-test("text group statuses carry the V2 envelope and custom Benfei audience metadata", () => {
+test("text group statuses carry the V2 envelope and custom DamzD audience metadata", () => {
   const secret = Buffer.alloc(32, 7);
   const inner = proto.Message.fromObject({
     extendedTextMessage: {
@@ -52,11 +52,11 @@ test("text group statuses carry the V2 envelope and custom Benfei audience metad
   attachCustomStatusAudience(payload);
   const audience = payload.groupStatusMessageV2.message.extendedTextMessage.contextInfo.statusAudienceMetadata;
   assert.equal(audience.audienceType, 1);
-  assert.equal(audience.listName, "Benfei Tech");
+  assert.equal(audience.listName, "DamzD");
   assert.equal(audience.listEmoji, "🧑‍💻");
 
   const encoded = proto.Message.encode(payload).finish();
-  const nameWire = Buffer.concat([Buffer.from([18, Buffer.byteLength("Benfei Tech")]), Buffer.from("Benfei Tech")]);
+  const nameWire = Buffer.concat([Buffer.from([18, Buffer.byteLength("DamzD")]), Buffer.from("DamzD")]);
   const emojiWire = Buffer.concat([Buffer.from([26, Buffer.byteLength("🧑‍💻")]), Buffer.from("🧑‍💻")]);
   assert.notEqual(encoded.indexOf(nameWire), -1);
   assert.notEqual(encoded.indexOf(emojiWire), -1);
@@ -73,12 +73,12 @@ test("postGroupStatus relays a text status to the selected group", async () => {
     }
   };
 
-  const result = await postGroupStatus(ctx, "120363000000000001@g.us", "text", { text: "Hello from FEI" }, GROUP_STATUS_COLORS[1]);
+  const result = await postGroupStatus(ctx, "120363000000000001@g.us", "text", { text: "Hello from DamzD" }, GROUP_STATUS_COLORS[1]);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].jid, "120363000000000001@g.us");
-  assert.equal(calls[0].message.groupStatusMessageV2.message.extendedTextMessage.text, "Hello from FEI");
+  assert.equal(calls[0].message.groupStatusMessageV2.message.extendedTextMessage.text, "Hello from DamzD");
   assert.equal(calls[0].message.groupStatusMessageV2.message.extendedTextMessage.backgroundArgb, 0xFF2563EB);
-  assert.equal(calls[0].message.groupStatusMessageV2.message.extendedTextMessage.contextInfo.statusAudienceMetadata.listName, "Benfei Tech");
+  assert.equal(calls[0].message.groupStatusMessageV2.message.extendedTextMessage.contextInfo.statusAudienceMetadata.listName, "DamzD");
   assert.equal(calls[0].options.useCachedGroupMetadata, false);
   assert.equal(calls[0].options.additionalNodes[0].attrs.is_group_status, "true");
   assert.ok(result.messageId);

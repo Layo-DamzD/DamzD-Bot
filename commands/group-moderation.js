@@ -49,7 +49,7 @@ async function requireGroupAdmin(ctx, requireBotAdmin = false) {
       isAdmin(participant) && participantIds(participant).some(id => selfIds.includes(id))
     );
     if (!botIsAdmin) {
-      await ctx.reply("⛔ FEI XMD must be a group admin to enforce link moderation.");
+      await ctx.reply("⛔ DamzD must be a group admin to enforce link moderation.");
       return null;
     }
   }
@@ -106,7 +106,7 @@ export default [
 
       await groupModeration.setSetting(ctx.jid, "antilink", value === "on");
       await ctx.reply(value === "on"
-        ? "✅ Antilink enabled. Links from non-admin members will be deleted when FEI XMD has admin permission."
+        ? "✅ Antilink enabled. Links from non-admin members will be deleted when DamzD has admin permission."
         : "🔕 Antilink disabled for this group.");
     }
   },

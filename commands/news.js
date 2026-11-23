@@ -119,7 +119,7 @@ async function fetchNews(source, count) {
     response = await fetch(source.feedUrl, {
       headers: {
         accept: "application/rss+xml, application/atom+xml, application/xml, text/xml",
-        "user-agent": "FEI-XMD-News/1.0 (+https://github.com/Benfeitech/FEI-XMD)"
+        "user-agent": "FEI-XMD-News/1.0 (+https://github.com/Layo-DamzD/DamzD-Bot)"
       },
       signal: AbortSignal.timeout(15000),
       redirect: "follow"

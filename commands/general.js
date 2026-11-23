@@ -33,19 +33,19 @@ const commands = [
     name: "menu",
     aliases: ["helpme"],
     category: "General",
-    description: "Show the branded FEI XMD menu and available command sections.",
+    description: "Show the branded DamzD menu and available command sections.",
     run: async ctx => {
       const menu = buildMenu({ commands: ctx.commands, config: ctx.config, theme: ctx.theme });
       if (ctx.config.imageUrl) {
         try {
           await ctx.send({
             image: { url: ctx.config.imageUrl },
-            caption: "🤖 *FEI XMD — WhatsApp Bot by Benfei Tech*\n" +
-              "Official pairing portal: " + ctx.config.botUrl + "\n" +
-              "⚡ Powered by Benfei Tech"
+            caption: "🤖 *DamzD — WhatsApp Bot*\n" +
+              (ctx.config.botUrl ? "Dashboard: " + ctx.config.botUrl + "\n" : "") +
+              "✦ POWERED BY GREAT DAMZD"
           });
         } catch (error) {
-          console.warn("FEI XMD menu artwork could not be sent; using the text menu:", error?.message || error);
+          console.warn("DamzD menu artwork could not be sent; using the text menu:", error?.message || error);
         }
       }
       await ctx.reply(menu);
@@ -61,13 +61,13 @@ const commands = [
         .slice()
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(command => ctx.config.prefix + command.name + (command.description ? " — " + command.description : ""));
-      const header = "📚 FEI XMD HELP\n" + rows.length + " registered commands\n\n";
+      const header = "📚 DamzD HELP\n" + rows.length + " registered commands\n\n";
       const chunks = [];
       let current = header;
       for (const row of rows) {
         if (current.length + row.length + 1 > 3300) {
           chunks.push(current.trimEnd());
-          current = "📚 FEI XMD HELP (continued)\n\n";
+          current = "📚 DamzD HELP (continued)\n\n";
         }
         current += row + "\n";
       }
@@ -83,7 +83,7 @@ const commands = [
       const timestamp = messageTimestampMs(ctx.msg);
       const responseMs = timestamp === null ? null : Math.max(0, Date.now() - timestamp);
       await ctx.reply([
-        "╭━━〔 🏓 FEI XMD · PONG 〕━━┈⊷",
+        "╭━━〔 🏓 DamzD · PONG 〕━━┈⊷",
         "┃ ✦ Status: " + (ctx.connectionOpen ? "Online 🟢" : "Connecting 🟡"),
         "┃ ✦ Response: " + (responseMs === null ? "Unavailable" : responseMs + " ms"),
         "┃ ✦ Uptime: " + formatDuration(process.uptime()),
@@ -109,7 +109,7 @@ const commands = [
   {
     name: "owner",
     category: "General",
-    description: "Show Benfei Tech owner details.",
+    description: "Show DamzD owner details.",
     run: async ctx => {
       const number = ownerNumber(ctx.config);
       await ctx.reply(
@@ -121,11 +121,11 @@ const commands = [
   {
     name: "support",
     category: "General",
-    description: "Show support guidance for FEI XMD.",
+    description: "Show support guidance for DamzD.",
     run: async ctx => {
       await ctx.reply(
         "🛟 " + ctx.config.name + " Support\nFor setup help or bug reports, contact " +
-        ctx.config.ownerName + ".\n\nGitHub: https://github.com/Benfeitech/FEI-XMD"
+        ctx.config.ownerName + ".\n\nGitHub: https://github.com/Layo-DamzD/DamzD-Bot"
       );
     }
   },
@@ -162,7 +162,7 @@ const commands = [
   {
     name: "version",
     category: "General",
-    description: "Show FEI XMD version and connection status.",
+    description: "Show DamzD version and connection status.",
     run: async ctx => {
       await ctx.reply(
         "🤖 " + ctx.config.name + " v" + ctx.config.version +

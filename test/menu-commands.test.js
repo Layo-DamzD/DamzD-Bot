@@ -8,24 +8,17 @@ import { loadCommands } from "../handlers/command-loader.js";
 import { buildMenu } from "../lib/menu.js";
 
 const expectedTitles = [
-  "🏠 ɢᴇɴᴇʀᴀʟ",
+  "⚡ ɢᴇɴᴇʀᴀʟ",
   "🧠 ᴀɪ ᴄʜᴀᴛ",
   "🎨 ᴀɪ ᴍᴇᴅɪᴀ",
-  "📰 ɴᴇᴡs ᴅᴇsᴋ",
-  "👥 ɢʀᴏᴜᴘ ᴛᴏᴏʟs",
+  "📰 ɴᴇᴡs",
   "📥 ᴅᴏᴡɴʟᴏᴀᴅs",
-  "🎮 ғᴜɴ ɢᴀᴍᴇs",
-  "🎉 ғᴜɴ ᴍɪx",
-  "🌸 ᴀɴɪᴍᴇ ɪɴғᴏ",
-  "🖼 ᴀɴɪᴍᴇ ᴀʀᴛ",
-  "🎞 ᴀɴɪᴍᴇ ɢɪғs",
-  "💞 ᴀɴɪᴍᴇ ʀᴇᴀᴄᴛɪᴏɴs",
-  "⚡ ᴀɴɪᴍᴇ ᴍᴏᴠᴇs",
-  "🖼 ᴄᴀɴᴠᴀs ᴛᴏᴏʟs",
-  "🛠️ ᴍᴇᴅɪᴀ ᴛᴏᴏʟs",
-  "🔒 ᴄʜᴀᴛ ᴘʀɪᴠᴀᴄʏ",
-  "📱 sᴛᴀᴛᴜs ᴛᴏᴏʟs",
-  "👑 ᴏᴡɴᴇʀ ᴛᴏᴏʟs"
+  "🛠️ ᴛᴏᴏʟs",
+  "🎉 ғᴜɴ",
+  "🎮 ɢᴀᴍᴇs",
+  "👥 ɢʀᴏᴜᴘ",
+  "📱 sᴛᴀᴛᴜs",
+  "👑 ᴏᴡɴᴇʀ"
 ];
 
 test("all selected public commands are loaded without collisions", async () => {
@@ -89,21 +82,21 @@ test("sensitive, invasive and channel-specific commands are not registered", asy
   assert.equal(theme.sections.some(section => section.key === "Channel"), false);
 });
 
-test("all 18 section titles appear in the reference order with no Channel section", async () => {
+test("all 11 DamzD section titles appear in the reference order with no Channel section", async () => {
   const { commands } = await loadCommands(path.resolve("commands"));
   const menu = buildMenu({ commands, config, theme });
   const positions = expectedTitles.map(title => menu.indexOf(title));
 
-  assert.equal(theme.sections.length, 18);
+  assert.equal(theme.sections.length, 11);
   assert.ok(positions.every(position => position >= 0));
   assert.ok(positions.every((position, index) => index === 0 || positions[index - 1] < position));
   assert.equal(menu.includes("📢 ᴄʜᴀɴɴᴇʟ"), false);
-  for (const command of ["news", "groupinfo", "aio", "trivia", "joke", "anime", "waifu2", "wave", "wndwqute", "lyrics", "privacy", "statusdraft", "runtime"]) {
+  for (const command of ["menu", "ping", "news", "groupinfo", "aio", "joke", "trivia", "chatgpt", "lyrics", "privacy", "ggs", "ghost", "play2"]) {
     assert.ok(menu.includes(config.prefix + command), "menu does not display " + command);
   }
 });
 
-test("uses the official FEI XMD artwork, pairing portal, newsletter identity and single owner", () => {
+test("uses the DamzD identity: artwork, dashboard link, neutral channel and single owner", () => {
   assert.equal(config.name, "DamzD");
   assert.equal(config.ownerName, "DamzD");
   assert.equal(config.ownerNumber, "2348000000000");
@@ -112,7 +105,7 @@ test("uses the official FEI XMD artwork, pairing portal, newsletter identity and
   assert.equal(config.channel.name, "ᴅᴀᴍᴢᴅ");
   assert.equal(config.channel.jid, "");
   assert.equal(config.imageUrl, "https://res.cloudinary.com/dqqyvozdw/image/upload/v1792848652/arbeimjfqkkfpn9zvfhf.png");
-  assert.equal(config.botUrl, "https://fei-xmd.benfeilab.com");
+  assert.equal(config.botUrl, "");
 });
 
 test("the menu sends official artwork and still includes the complete text menu", async () => {
@@ -130,9 +123,9 @@ test("the menu sends official artwork and still includes the complete text menu"
   await menuCommand.run(ctx);
   assert.equal(sent[0].type, "media");
   assert.equal(sent[0].payload.image.url, config.imageUrl);
-  assert.ok(sent[0].payload.caption.includes(config.botUrl));
+  assert.ok(sent[0].payload.caption.includes("POWERED BY GREAT DAMZD"));
   assert.equal(sent[1].type, "text");
-  assert.ok(sent[1].payload.includes("🏠 ɢᴇɴᴇʀᴀʟ"));
-  assert.ok(sent[1].payload.includes("👑 ᴏᴡɴᴇʀ ᴛᴏᴏʟs"));
+  assert.ok(sent[1].payload.includes("⚡ ɢᴇɴᴇʀᴀʟ"));
+  assert.ok(sent[1].payload.includes("👑 ᴏᴡɴᴇʀ"));
   assert.equal(sent[1].payload.includes("📢 ᴄʜᴀɴɴᴇʟ"), false);
 });
