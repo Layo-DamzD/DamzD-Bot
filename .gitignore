@@ -1,11 +1,2 @@
+skills/
 node_modules/
-.env
-.env.*
-!.env.example
-auth_info_baileys/
-sessions/
-data/
-*.log
-npm-debug.log*
-.DS_Store
-coverage/

@@ -1,0 +1,115 @@
+================================================================
+  DamzD on YOUR PHONE (Termux) — complete setup guide
+  Why: your phone's IP is trusted by YouTube, so songs come
+  through FULL, not as 30-second previews.
+================================================================
+
+WHAT YOU NEED
+  - Termux (from F-Droid or GitHub, NOT the old Play Store build)
+  - About 500 MB of free space
+  - Your phone stays charged — that's her "server" now
+
+----------------------------------------------------------------
+STEP 1 — INSTALL (copy-paste these 4 lines, one at a time)
+----------------------------------------------------------------
+
+pkg update -y && pkg upgrade -y && pkg install nodejs-lts git ffmpeg -y
+
+git clone https://github.com/Layo-DamzD/DamzD-Bot.git
+
+cd DamzD-Bot
+
+npm install && npm start
+
+  (If you are on an OLDER copy of the repo and npm says
+   "EALLOWGIT / Fetching packages of type git have been
+   disabled", first run:  git pull
+   and then  npm install  again — the repo now carries the
+   fix. Or just allow it once by hand:
+   npm install --allow-git=all)
+
+OPTIONAL — ADD YOUR FREE KEYS (makes her stronger)
+  nano .env    (creates the file; paste, then Ctrl+O, Enter, Ctrl+X)
+
+    GROQ_API_KEY=...      free from console.groq.com — smarter brain
+    NABEES_API_KEY=...    free from apis.nabeestech.com — video + song rescue
+    PUTER_AUTH_TOKEN=...  free from puter.com — real Claude/GPT/Gemini
+
+  Without keys she still works: chatting, songs, groups, everything
+  keyless. Keys just make her sharper. On the phone she is NOT
+  running from Render, so these keys live in this .env file only.
+
+----------------------------------------------------------------
+STEP 2 — PAIR HER (first start only)
+----------------------------------------------------------------
+
+The terminal prints a pairing code like  ABCD-1234.
+
+On your phone:  WhatsApp > Settings > Linked devices >
+Link a device > "Link with phone number instead" >
+type the code from the terminal.
+
+She connects and greets you. The session is saved in the
+DamzD-Bot/auth folder — this is her memory. As long as that
+folder exists you NEVER re-pair, even after phone restarts.
+
+----------------------------------------------------------------
+STEP 3 — STOP ANDROID FROM KILLING HER (important!)
+----------------------------------------------------------------
+
+Android loves to kill background apps. Do these once:
+
+1.  In the Termux notification, tap "ACQUIRE WAKELOCK".
+2.  Phone Settings > Apps > Termux > Battery >
+    "Unrestricted" / "Don't optimize".
+3.  Keep Termux in the recent-apps list, don't swipe it away.
+4.  On Xiaomi/Oppo/Vivo phones also enable "Autostart" for Termux.
+
+Night time: leave the phone on charge. She runs fine while charging.
+
+----------------------------------------------------------------
+WHAT HAPPENS IF MY PHONE DIES / I RESTART IT?
+----------------------------------------------------------------
+
+- Your normal WhatsApp keeps working exactly as usual — she is
+  just a linked device, like WhatsApp Web. Nothing breaks.
+- When the phone comes back: open Termux > cd DamzD-Bot >
+  npm start. She reconnects by herself from the saved session.
+- Messages sent while she was off simply get no reply. She does
+  not answer old messages after waking up.
+- Only if you delete Termux or the DamzD-Bot folder does she
+  lose her memory — then you pair once again, like Step 2.
+
+----------------------------------------------------------------
+PHONE + RENDER — DON'T RUN BOTH AT ONCE
+----------------------------------------------------------------
+
+If both the Render bot and the phone bot are online at the same
+time, she answers twice (two linked devices, both listening).
+
+Pick one captain:
+
+  - Phone primary (best songs):  Render Dashboard >
+    damzd > Suspend Service. Resume it any time you like.
+  - Render primary (24/7 uptime): just don't start Termux.
+    Songs will be limited to what the cloud allows.
+
+You can switch whenever — but expect to re-pair a device that
+was offline/suspended for a long time.
+
+----------------------------------------------------------------
+DATA & BATTERY REALITY CHECK
+----------------------------------------------------------------
+
+- Songs download to your phone first, then go to WhatsApp —
+  that's normal mobile-data usage (a 5 MB song ≈ a YouTube short).
+- On WiFi all day = basically free.
+- Battery drain with wakelock is small but real; keep her on
+  charge overnight.
+
+================================================================
+  ONE-LINE STARTER (after first setup, every time you come back):
+
+  cd DamzD-Bot && npm start
+
+================================================================
