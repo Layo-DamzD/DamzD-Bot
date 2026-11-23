@@ -1,4 +1,4 @@
-# DamzD Bot — v2.0.0
+# DamzD Bot — v2.0.1
 
 A personal WhatsApp assistant on the **FEI-XMD engine** (the father repo's
 codebase is the foundation — every runtime, command file and download engine
