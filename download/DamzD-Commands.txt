@@ -1,14 +1,14 @@
 ================================================================
-  DamzD — complete command list (v2.2.1)
-  Generated 2026-11-23 19:44 UTC
+  DamzD — complete command list (v2.3.0)
+  Generated 2026-11-23 22:00 UTC
 ================================================================
 
-181 commands in 16 sections.
+183 commands in 16 sections.
 Every command starts with the prefix . — e.g. .ping
 In chat you can also just talk to me normally — no command needed.
 
 ----------------------------------------------------------------
-AI & CHAT  (8 commands)
+AI & CHAT  (10 commands)
 ----------------------------------------------------------------
 .aidetect
     Estimate if a text looks AI-generated.
@@ -26,6 +26,10 @@ AI & CHAT  (8 commands)
     Summarize text into clear, concise points.
 .fable  (also: .fable5)
     Claude smart router — picks the best brain: Claude for stories/code/reasoning, Deepseek for maths, Gemini for wild ideas.
+.gemini
+    Google Gemini 4 Argon on the owner's Puter accounts — fast, broad-knowledge answers.
+.grok
+    xAI Grok 4.6 on the owner's Puter accounts — witty, direct takes.
 
 ----------------------------------------------------------------
 AI MEDIA  (8 commands)

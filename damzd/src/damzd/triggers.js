@@ -2,12 +2,29 @@
 // that run WITHOUT a prefix:
 //   • any reaction with text on a remembered view-once recovers it silently
 //     to the owner's own chat (the old 🔓 flow — no trace in the chat),
-//   • "onlineusers" and "ghost" answer as bare words, no dot needed.
+//   • bare words answer without the dot: the personal set (song, menu,
+//     help, lyrics, onlineusers, ghost, top) and every group tool — the
+//     whole message must be exactly the command word, so ordinary
+//     sentences ("kick him please") never fire; the commands themselves
+//     still enforce their own admin/owner checks.
 // Everything here is a no-op when nothing matches, so normal chats are
 // never disturbed.
 import { findCachedViewOnce, readCachedMedia } from "./viewonce.js";
 
-const DOTLESS = new Set(["onlineusers", "ghost"]);
+const DOTLESS_PERSONAL = new Set([
+  "song", "menu", "help", "lyrics", "onlineusers", "ghost", "top"
+]);
+
+// Only these dotless commands make sense with trailing words — e.g.
+// "song Blinding Lights". For any other command a bare multi-word message
+// ("help me please") is just someone talking, not a trigger.
+const DOTLESS_WITH_ARGS = new Set(["song", "lyrics"]);
+
+// A bare word may run when it is in the personal set or is a group tool.
+// Group tools only make sense in a group; in a DM they politely error.
+function dotlessAllowed(name, definition) {
+  return DOTLESS_PERSONAL.has(name) || definition?.category === "Group";
+}
 
 // The official Baileys retry download (father-repo proven): works from a
 // stripped quote or an aged URL while the sender's phone is online.
@@ -137,9 +154,20 @@ export async function handleDamzDTriggers({ sock, msg, jid, text, lookup, config
       await handleUnlockReaction({ sock, jid, reaction, config });
       return;
     }
-    const dotless = String(text || "").trim().toLowerCase();
-    if (DOTLESS.has(dotless) && lookup instanceof Map && lookup.has(dotless)) {
-      await runParsed({ commandName: dotless, args: "", definition: lookup.get(dotless) });
+    const raw = String(text || "").trim();
+    if (raw && lookup instanceof Map) {
+      // The FIRST word names the command; any remaining words are its args.
+      const words = raw.split(/\s+/);
+      const head = (words[0] || "").toLowerCase();
+      const hasArgs = words.length > 1;
+      if (lookup.has(head) && dotlessAllowed(head, lookup.get(head)) &&
+          (!hasArgs || DOTLESS_WITH_ARGS.has(head))) {
+        await runParsed({
+          commandName: head,
+          args: words.slice(1).join(" "),
+          definition: lookup.get(head)
+        });
+      }
     }
   } catch {
     /* triggers are conveniences — a failure must never break the runtime */

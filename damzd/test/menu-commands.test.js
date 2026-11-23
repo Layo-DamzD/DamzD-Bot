@@ -17,8 +17,8 @@ test("every command is registered without collisions and the pruned set is exact
   const { commands, lookup } = await loadCommands(path.resolve("commands"));
   const count = category => commands.filter(command => command.category === category).length;
 
-  assert.equal(commands.length, 181);
-  assert.equal(count("AI & Chat"), 8);
+  assert.equal(commands.length, 183);
+  assert.equal(count("AI & Chat"), 10);
   assert.equal(count("AI Media"), 8);
   assert.equal(count("General"), 15);
   assert.equal(count("Owner"), 2);
@@ -63,7 +63,7 @@ test("every command is registered without collisions and the pruned set is exact
     "pictures", "poke", "pout", "randomanime", "randommanga", "recommend", "run", "shake", "shrug", "sip",
     "sleep", "smile", "smug", "spin", "staff", "stare", "streaming", "tickle", "think", "teehee", "topanime",
     "topmanga", "trailer", "wag", "waifu2", "wave", "whatanime", "wink", "yawn", "yeet",
-    "chuck", "nasa", "close", "gpt", "deepseek2", "removebg", "gemini", "grok", "qwen",
+    "chuck", "nasa", "close", "gpt", "deepseek2", "removebg", "qwen",
     "tts", "tts2", "tts3", "tts4", "tts5"
   ]) {
     assert.equal(lookup.has(name), false, "removed command still registered: " + name);

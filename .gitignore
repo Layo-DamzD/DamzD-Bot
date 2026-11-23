@@ -1,2 +1,12 @@
 skills/
 node_modules/
+
+# secrets and workspace noise — never push these
+.env
+.deploy-token
+tool-results/
+upload/
+repo-fei/
+damzd-ai/
+damzd-old-stale/
+download/puter-token-for-render.txt

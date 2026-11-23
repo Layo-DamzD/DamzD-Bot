@@ -5,9 +5,32 @@ import {
   unicodeBox,
   withPoweredFooter
 } from "../lib/api-client.js";
+import { askPuterFamily } from "../lib/puter-ai.js";
 
 const MAX_PROMPT = 3500;
 const OMEGATECH = "https://api.omegatech.app/api";
+
+// The owner's Puter-powered brains. Model ladders verified live:
+// gemini-4-argon answers; grok only exists on Puter under its
+// provider-prefixed names (infron:x-ai/grok-4.6 and friends).
+function createPuterCommand({ name, aliases = [], family, title, description }) {
+  return {
+    name,
+    aliases,
+    category: "AI & Chat",
+    description,
+    run: async ctx => {
+      const prompt = requirePrompt(ctx);
+      const { text, model } = await askPuterFamily({
+        prompt,
+        family,
+        system: "You are a helpful, direct assistant inside a WhatsApp bot. Answer in clean plain text; use *asterisks* for bold sparingly; no markdown headers, no bullet lists unless asked."
+      });
+      const via = model === "pollinations" ? " (free tier)" : "";
+      await sendAnswer(ctx, title + via, text);
+    }
+  };
+}
 
 function requirePrompt(ctx, example) {
   const query = String(ctx.args || "").trim();
@@ -192,5 +215,17 @@ export default [
         extractApiText(payload);
       await sendAnswer(ctx, title, answer);
     }
-  }
+  },
+  createPuterCommand({
+    name: "gemini",
+    title: "💎 GEMINI 4 ARGON",
+    family: "gemini",
+    description: "Google Gemini 4 Argon on the owner's Puter accounts — fast, broad-knowledge answers."
+  }),
+  createPuterCommand({
+    name: "grok",
+    title: "⚡ GROK 4.6",
+    family: "grok",
+    description: "xAI Grok 4.6 on the owner's Puter accounts — witty, direct takes."
+  })
 ];
