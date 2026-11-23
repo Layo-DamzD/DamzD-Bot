@@ -16,7 +16,7 @@ import { resolveCommandInput } from "./loader.js";
 import { askAI, hasAIBrain } from "./ai.js";
 import { downloadContentFromMessage } from "baileys";
 import { detectPlatform, resolveAllInOne, mediaKind, cleanTitle } from "./downloads.js";
-import { messageText, mentionedJids, quotedParticipant, numberFromJid, sleep, botImageMedia, unwrapMessage } from "./utils.js";
+import { messageText, mentionedJids, quotedParticipant, numberFromJid, normalizeJid, sleep, botImageMedia, unwrapMessage } from "./utils.js";
 import { config as appConfig, isOwnerNumber, addRuntimeOwner } from "./config.js";
 import { WELCOME_ON, GOODBYE_ON, ANTILINK_ON } from "./store.js";
 import { registerCallHook, runSideEffects, recordActivity } from "./hooks.js";
@@ -410,7 +410,7 @@ async function handleReactionSave(deps, sock, msg) {
         if (own) {
           sock.sendMessage(own + "@s.whatsapp.net", {
             text: "👀 Reaction noted, but that message never reached me — there is nothing to pull back.\n" +
-              "It was sent while I was offline, restarting or re-pairing: WhatsApp does not re-deliver missed media to a fresh link, so it cannot be recovered, opened or not.\n" +
+              "WhatsApp does not re-deliver missed media — whether I was restarting, re-pairing, or the network never handed it over — so it cannot be recovered, opened or not.\n" +
               "Ask the sender to resend it NOW — watch for my 🔒 note in your own chat — then react or reply Ggs to it.\n" +
               "(id " + target.id + " — media messages remembered since boot: " + viewOnceCacheSize() + ". Recent ids: " + (recentStashIds(3).map(x => "…" + x).join("  ") || "none") + ".)"
           }).catch(() => {});
@@ -426,12 +426,20 @@ async function handleReactionSave(deps, sock, msg) {
     if (!owner && (appConfig.accessMode !== "public" || banned.includes(senderNumber))) return false;
 
     if (!["image", "video", "audio", "sticker"].includes(kind)) return false;
-    const pull = async () => {
-      const stream = await downloadContentFromMessage(node, kind === "sticker" ? "sticker" : kind);
+    const pull = async (targetNode = node) => {
+      const stream = await downloadContentFromMessage(targetNode, kind === "sticker" ? "sticker" : kind);
       const chunks = [];
       for await (const chunk of stream) chunks.push(chunk);
       return Buffer.concat(chunks);
     };
+    const { refreshMediaLocation, officialRetryDownload } = await import("./utils.js");
+    const selfIds = [sock?.user?.id, sock?.user?.lid].map(id => normalizeJid(String(id || ""))).filter(Boolean);
+    const retryKey = () => ({
+      remoteJid: target.remoteJid || chat,
+      id: target.id,
+      fromMe: Boolean(target.fromMe) || (cached?.sender ? selfIds.includes(cached.sender) : false),
+      ...(cached?.sender ? { participant: cached.sender } : {})
+    });
     let buffer = readCachedMedia(cached);
     if (buffer) {
       // Captured on arrival — the bytes never depend on WhatsApp's
@@ -440,28 +448,21 @@ async function handleReactionSave(deps, sock, msg) {
     } else try {
       buffer = await pull();
     } catch {
-      // Stripped or expired media location — the media-retry protocol is the
-      // one chance left: ask WhatsApp to re-serve fresh media info for the
-      // original message, then pull the same node again. The sender's device
-      // can answer the retry late, so one more refresh-and-download pass
-      // runs before the failure stands.
-      const refreshed = await refreshMediaLocation(sock, {
-        remoteJid: target.remoteJid || chat,
-        id: target.id,
-        participant: cached?.sender || undefined
-      }, node);
-      if (!refreshed) throw new Error("media retry not possible");
-      try {
-        buffer = await pull();
-      } catch {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        await refreshMediaLocation(sock, {
-          remoteJid: target.remoteJid || chat,
-          id: target.id,
-          participant: cached?.sender || undefined
-        }, node);
-        buffer = await pull();
+      // Stripped or expired media location — the media-retry protocol returns
+      // a FRESH node, and only downloading THAT can succeed (re-pulling the
+      // stale copy ignores a retry that actually worked). Baileys' own
+      // reupload protocol is the final rung.
+      const fresh = await refreshMediaLocation(sock, retryKey(), node);
+      buffer = fresh ? await pull(fresh).catch(() => null) : null;
+      if (!buffer) {
+        buffer = await officialRetryDownload(sock, retryKey(), node);
       }
+      if (!buffer) {
+        await sleep(1500);
+        const fresh2 = await refreshMediaLocation(sock, retryKey(), node);
+        buffer = fresh2 ? await pull(fresh2).catch(() => null) : null;
+      }
+      if (!buffer) throw new Error("media retry not possible");
     }
     if (!buffer.length) throw new Error("empty media");
 

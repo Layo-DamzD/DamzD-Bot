@@ -178,39 +178,92 @@ export function isHttpsUrl(value) {
 
 const MEDIA_NODE_KEYS = ["imageMessage", "videoMessage", "audioMessage", "stickerMessage", "documentMessage"];
 
+// Which *Message key a bare media node travels under — for a full message
+// object. A bare media node (mediaKey + mimetype, no *Message key) is the
+// shape every stash entry and every quote actually carries, so the retry
+// helpers below accept both shapes and wrap the bare one themselves.
+export function mediaNodeKeyOf(node) {
+  return MEDIA_NODE_KEYS.find(k => node?.[k]) || null;
+}
+
+function mediaRetryShape(node) {
+  const keyed = mediaNodeKeyOf(node);
+  if (keyed) return { key: keyed, message: node };
+  if (!node?.mediaKey) return null; // neither shape — nothing to retry with
+  // Bare media node: guess the *Message kind from the mimetype (a sticker's
+  // image/webp correctly lands in imageMessage — the retry only needs the
+  // key to package the node, the download is mimetype-driven anyway).
+  const mime = String(node.mimetype || "");
+  const kind = mime.startsWith("video/") ? "videoMessage"
+    : mime.startsWith("audio/") ? "audioMessage"
+    : "imageMessage";
+  return { key: kind, message: { [kind]: node } };
+}
+
 // WhatsApp strips or expires the media location on messages the bot still
 // holds: quotes lose url/directPath outright, and reconnect syncs can serve
 // arrivals without them too ("No valid media URL or directPath present in
 // message"). The official media-retry protocol asks WhatsApp and the
 // sender's device to re-serve fresh media info for a message whose mediaKey
-// we still have — then the very same node downloads fine. Mutates the node
-// in place; returns false when there is nothing to retry with.
+// we still have. Baileys' updateMediaMessage RETURNS the updated message —
+// the fresh node with a new url/directPath is the whole point, so it is
+// returned here. It does NOT mutate the node in place (the v1.4.30 comment
+// claimed it did — that made every caller re-download the stale copy and
+// waste a retry that had actually succeeded). Returns the fresh node, or
+// null when there is nothing to retry with. The sender's phone can be slow
+// to answer, so a refused or timed-out attempt is retried once.
 export async function refreshMediaLocation(sock, key, node) {
   try {
-    const nodeKey = MEDIA_NODE_KEYS.find(k => node?.[k]);
-    if (!nodeKey || !key?.id || !node.mediaKey || typeof sock?.updateMediaMessage !== "function") return false;
-    // The media-retry asks WhatsApp AND the sender's device to re-serve fresh
-    // media info. The sender's phone can be slow to answer the first request,
-    // so a refused or timed-out attempt is retried once after a short pause
-    // before the caller's original error stands.
+    const shape = mediaRetryShape(node);
+    if (!shape || !key?.id || !node.mediaKey || typeof sock?.updateMediaMessage !== "function") return null;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        await sock.updateMediaMessage({
+        const updated = await sock.updateMediaMessage({
           key: {
             remoteJid: String(key.remoteJid || ""),
             id: String(key.id),
             fromMe: Boolean(key.fromMe),
             ...(key.participant ? { participant: String(key.participant) } : {})
           },
-          message: { [nodeKey]: node }
+          message: shape.message
         });
-        return true;
+        const fresh = updated?.message?.[shape.key] || updated?.[shape.key];
+        if (fresh?.url || fresh?.directPath) return fresh;
       } catch (error) {
-        if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 1500));
+        if (attempt === 0) await sleep(1500);
       }
     }
-    return false;
+    return null;
   } catch {
-    return false; // the caller's original error stands
+    return null; // the caller's original error stands
+  }
+}
+
+// The official Baileys retry path (the father repo's proven shape):
+// downloadMediaMessage drives the whole reupload protocol itself — failed
+// download, media-retry IQ, fresh url, re-download — and returns the bytes.
+// `message` accepts a full message object or a bare media node.
+export async function officialRetryDownload(sock, key, message) {
+  try {
+    const shape = mediaRetryShape(message);
+    if (!shape || !key?.id || typeof sock?.updateMediaMessage !== "function") return null;
+    const { downloadMediaMessage } = await import("baileys");
+    const buffer = await downloadMediaMessage(
+      {
+        key: {
+          remoteJid: String(key.remoteJid || ""),
+          id: String(key.id),
+          fromMe: Boolean(key.fromMe),
+          ...(key.participant ? { participant: String(key.participant) } : {})
+        },
+        message: shape.message
+      },
+      "buffer",
+      {},
+      { reuploadRequest: sock.updateMediaMessage }
+    );
+    return Buffer.isBuffer(buffer) && buffer.length ? buffer : null;
+  } catch {
+    return null;
   }
 }

@@ -92,6 +92,22 @@ async function quotedMedia(ctx, { allowDocument = true } = {}) {
     ["audioMessage", "audio"],
     ...(allowDocument ? [["documentMessage", "document"]] : [])
   ];
+  // The media-retry protocol validates the key against the ORIGINAL sender,
+  // so fromMe must reflect who sent that message — comparing the quote's
+  // participant against the bot's own ids (phone and LID forms) is the only
+  // reliable way in LID-mode chats. A wrong fromMe makes WhatsApp refuse the
+  // retry even when the sender's phone is online and ready to re-serve.
+  const { normalizeJid, refreshMediaLocation, officialRetryDownload, mediaNodeKeyOf } = await import("../src/utils.js");
+  const participant = normalizeJid(String(info?.participant || ""));
+  const selfIds = [ctx.sock?.user?.id, ctx.sock?.user?.lid].map(normalizeJid).filter(Boolean);
+  const retryKey = {
+    remoteJid: ctx.jid,
+    id: info?.stanzaId,
+    fromMe: participant ? selfIds.includes(participant) : Boolean(ctx.msg.key?.fromMe),
+    ...(participant ? { participant } : {})
+  };
+  const tryRefresh = async node => refreshMediaLocation(ctx.sock, retryKey, node);
+  const tryOfficial = async node => officialRetryDownload(ctx.sock, retryKey, node);
   for (const [key, kind] of kinds) {
     const node = inner[key];
     if (!node) continue;
@@ -99,49 +115,38 @@ async function quotedMedia(ctx, { allowDocument = true } = {}) {
       return { buffer: await downloadNode(node, kind), kind, node };
     } catch (error) {
       // Quotes of a view-once arrive with the media URL and directPath
-      // stripped by WhatsApp, so the download can only fail. If the bot saw
-      // the original view-once in this chat, the cache still holds the full
-      // metadata — match it back by the quoted stanza id and download that.
-      const { refreshMediaLocation } = await import("../src/utils.js");
+      // stripped by WhatsApp, so the direct download can only fail. The
+      // ladder, in order: bytes captured on arrival → the cached
+      // full-metadata node → a media-retry refresh (download the FRESH node
+      // it returns) → Baileys' own reupload protocol.
       const cached = await findCachedViewOnce(ctx.jid, info?.stanzaId) || await cachedFromSnapshot(info?.stanzaId);
       if (cached) {
         const captured = readCachedMedia(cached);
         if (captured) return { buffer: captured, kind: cached.kind, node: cached.node };
         try {
           return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
-        } catch {
-          // Even the stashed arrival lost its media location — the media-retry
-          // protocol is the last chance for a fresh one. The sender's device
-          // can answer the retry late, so one more refresh-and-download pass
-          // runs before the failure stands.
-          await refreshMediaLocation(ctx.sock, { remoteJid: ctx.jid, id: info?.stanzaId, participant: info?.participant }, cached.node);
-          try {
-            return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
-          } catch {
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            await refreshMediaLocation(ctx.sock, { remoteJid: ctx.jid, id: info?.stanzaId, participant: info?.participant }, cached.node);
-            return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
-          }
-        }
-      }
-      // No cached copy at all: the quote itself still carries the mediaKey,
-      // which is exactly what the retry protocol needs to re-serve the media.
-      const refreshed = await refreshMediaLocation(ctx.sock, { remoteJid: info?.remoteJid || ctx.jid, id: info?.stanzaId, participant: info?.participant }, node);
-      if (refreshed) {
+        } catch { /* the stashed location is stale too — refresh below */ }
+        const fresh = await tryRefresh(cached.node);
+        const target = fresh || cached.node;
         try {
-          return { buffer: await downloadNode(node, kind), kind, node };
-        } catch {
-          await new Promise(resolve => setTimeout(resolve, 1500));
-          await refreshMediaLocation(ctx.sock, { remoteJid: info?.remoteJid || ctx.jid, id: info?.stanzaId, participant: info?.participant }, node);
-          return { buffer: await downloadNode(node, kind), kind, node };
-        }
+          return { buffer: await downloadNode(target, cached.kind), kind: cached.kind, node: target };
+        } catch { /* the retry's own protocol is next */ }
+        const official = await tryOfficial(target);
+        if (official) return { buffer: official, kind: cached.kind, node: target };
       }
-      // The retry could not refresh the quote either. If the bot never
-      // received this message at all (no stash, no snapshot), relaying
-      // Baileys' raw "No valid media URL or directPath" error is baffling —
-      // the reaction path already explains this wall honestly, so Ggs must
-      // match it. The owner gets the same plain-language reason and the same
-      // fix: resend while online, watch for the lock note, then react/Ggs.
+      // No cache (or the cache failed): the quote itself still carries the
+      // mediaKey, which is exactly what the retry protocol needs.
+      const fresh = await tryRefresh(node);
+      const target = fresh || node;
+      try {
+        return { buffer: await downloadNode(target, kind), kind, node: target };
+      } catch { /* last protocol below */ }
+      const official = await tryOfficial(target);
+      if (official) return { buffer: official, kind, node: target };
+      // Nothing recovered. If the bot never received this message at all (no
+      // stash, no snapshot), relaying Baileys' raw "No valid media URL or
+      // directPath" error is baffling — the reaction path already explains
+      // this wall honestly, so Ggs must match it.
       const { getCached } = await import("../src/cache.js");
       const { recentStashIds } = await import("../src/viewonce.js");
       const snapEntry = getCached(info?.stanzaId);
@@ -158,7 +163,20 @@ async function quotedMedia(ctx, { allowDocument = true } = {}) {
   }
   // A stripped quote can lose the media node entirely — try the cache first.
   const cached = await findCachedViewOnce(ctx.jid, info?.stanzaId) || await cachedFromSnapshot(info?.stanzaId);
-  if (cached) return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
+  if (cached) {
+    const captured = readCachedMedia(cached);
+    if (captured) return { buffer: captured, kind: cached.kind, node: cached.node };
+    try {
+      return { buffer: await downloadNode(cached.node, cached.kind), kind: cached.kind, node: cached.node };
+    } catch { /* refresh ladder below */ }
+    const fresh = await tryRefresh(cached.node);
+    const target = fresh || cached.node;
+    try {
+      return { buffer: await downloadNode(target, cached.kind), kind: cached.kind, node: target };
+    } catch { /* official protocol below */ }
+    const official = await tryOfficial(target);
+    if (official) return { buffer: official, kind: cached.kind, node: target };
+  }
   throw new Error("I could not find any image, video or sticker in that message");
 }
 

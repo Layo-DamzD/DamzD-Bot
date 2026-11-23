@@ -577,6 +577,26 @@ await check(".vvinfo reads the cached original, not the always-unwrapped quote",
   assert.match(firstText(), /WITHOUT content/, "a withheld arrival is reported as withheld, not 'false'");
 });
 
+await check("media-retry returns the FRESH node and the true fromMe", async () => {
+  const { refreshMediaLocation } = await import("../src/utils.js");
+  const stale = { mediaKey: "abc", url: "https://stale.example/v/t62", directPath: "/v/t62/stale", mimetype: "image/jpeg" };
+  const sent = [];
+  const fakeSock = {
+    updateMediaMessage: async msg => {
+      sent.push(msg);
+      return { message: { imageMessage: { ...stale, url: "https://fresh.example/v/t62", directPath: "/v/t62/fresh" } } };
+    }
+  };
+  const fresh = await refreshMediaLocation(fakeSock, { remoteJid: "chat@s.whatsapp.net", id: "RETRY-1", fromMe: true }, stale);
+  assert.ok(fresh?.url?.includes("fresh.example"), "the retry's fresh node is returned, not a boolean");
+  assert.equal(sent[0].key.fromMe, true, "fromMe passes through untouched");
+  assert.equal(sent[0].message.imageMessage.mediaKey, "abc", "the retry carries the mediaKey node");
+  const refused = { updateMediaMessage: async () => { throw new Error("conflict"); } };
+  assert.equal(await refreshMediaLocation(refused, { remoteJid: "c", id: "R", fromMe: false }, stale), null, "a refused retry returns null");
+  const empty = { updateMediaMessage: async () => ({ message: { imageMessage: { mediaKey: "abc" } } }) };
+  assert.equal(await refreshMediaLocation(empty, { remoteJid: "c", id: "R2", fromMe: false }, stale), null, "a retry without a fresh location returns null");
+});
+
 await check("non-owner group message without mention stays quiet", async () => {
   sent.length = 0;
   groqCalls.length = 0;
@@ -823,7 +843,7 @@ await check("connectNote greets the owner in the menu's look", async () => {
   const { connectNote } = await import("../commands/general.js");
   const note = connectNote({ name: "DamzD", prefix: "." });
   assert.match(note, /connected and online/);
-  assert.match(note, /1\.4\.44/);
+  assert.match(note, /1\.4\.45/);
   assert.match(note, /PREFIX|𝗣𝗥𝗘𝗙𝗜𝗫/);
   assert.match(note, /OWNER|𝗢𝗪𝗡𝗘𝗥/);
   assert.match(note, /MODE|𝗠𝗢𝗗𝗘/);
