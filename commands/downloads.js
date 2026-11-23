@@ -1,267 +1,253 @@
 import {
-  requirePlatformUrl,
-  resolveAllInOne,
-  resolveYouTubeVideo,
-  resolveYouTubeAudioNabees,
-  searchYouTube,
-  searchYouTubeAudio,
-  searchYouTubeNabees,
-  mediaKind,
-  cleanTitle,
-  PLATFORM_HOSTS
-} from "../src/downloads.js";
+  requestApiJson,
+  requestExternalJson,
+  safeFileName,
+  unicodeBox,
+  validateHttpsUrl
+} from "../lib/api-client.js";
+import { searchYouTubeAudio } from "../lib/youtube-play.js";
 
-async function deliver(ctx, resolved) {
-  const info = mediaKind(resolved.item, resolved.url);
-  const kind = info?.kind || "video";
-  const extension = info?.extension || "mp4";
-  const fileName = cleanTitle(resolved.title) + "." + extension;
+const AIO_API = "https://apis.nabeestech.com/api/v1/download/aio";
+const AIO_KEY = String(process.env.NABEES_API_KEY || "").trim();
+
+const PLATFORM_HOSTS = Object.freeze({
+  fb: ["facebook.com", "fb.com", "fb.watch"],
+  twitter: ["x.com", "twitter.com", "t.co"],
+  instagram: ["instagram.com", "instagr.am"],
+  ytmp4: ["youtube.com", "youtu.be"],
+  tiktok: ["tiktok.com", "vm.tiktok.com", "vt.tiktok.com"]
+});
+
+function requirePlatformUrl(ctx, label, allowedHosts) {
+  const raw = String(ctx.args || "").trim().split(/\s+/)[0];
+  if (!raw) throw new Error("Usage: " + ctx.config.prefix + ctx.commandName + " https://...");
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("Enter a valid " + label + " link.");
+  }
+  const host = url.hostname.toLowerCase();
+  const allowed = allowedHosts.some(suffix => host === suffix || host.endsWith("." + suffix));
+  if (url.protocol !== "https:" || url.username || url.password || !allowed) {
+    throw new Error("That is not a supported public " + label + " URL.");
+  }
+  return url.toString();
+}
+
+function responseData(payload) {
+  return payload?.data?.data || payload?.data || payload?.result || payload || {};
+}
+
+function safeMediaUrl(value, label = "media") {
+  try {
+    return validateHttpsUrl(value, label);
+  } catch {
+    return "";
+  }
+}
+
+function chooseMedia(data) {
+  const medias = Array.isArray(data?.medias) ? data.medias :
+    Array.isArray(data?.media) ? data.media : [];
+  const bestIndex = Number(data?.best?.index);
+  const bestMatch = Number.isInteger(bestIndex)
+    ? medias.find(item => Number(item?.index) === bestIndex)
+    : null;
+  const candidates = [bestMatch, data?.best, ...medias, data];
+  for (const item of candidates) {
+    if (!item || typeof item !== "object") continue;
+    const url = [item.url, item.directUrl, item.downloadUrl, item.proxyUrl]
+      .map(value => safeMediaUrl(value))
+      .find(Boolean);
+    if (url) return { item, url };
+  }
+  return null;
+}
+
+function extensionOf(item, url) {
+  const declared = String(item?.extension || item?.ext || "").toLowerCase().replace(/^\./, "");
+  if (/^[a-z0-9]{2,8}$/.test(declared)) return declared;
+  try {
+    return new URL(url).pathname.match(/\.([a-z0-9]{2,8})$/i)?.[1]?.toLowerCase() || "";
+  } catch {
+    return "";
+  }
+}
+
+function mediaKind(item, extension) {
+  const type = String(item?.type || item?.mimeType || item?.mime || "").toLowerCase();
+  if (item?.isImage || type.includes("image") || ["jpg", "jpeg", "png", "webp", "gif"].includes(extension)) return "image";
+  if (item?.isAudio || type.includes("audio") || ["mp3", "m4a", "aac", "ogg", "opus", "wav", "flac"].includes(extension)) return "audio";
+  if (item?.isVideo || type.includes("video") || ["mp4", "m4v", "mov", "webm", "mkv", "3gp"].includes(extension)) return "video";
+  return "document";
+}
+
+async function sendDownloadedMedia(ctx, url, title, item = {}) {
+  const extension = extensionOf(item, url);
+  const kind = mediaKind(item, extension);
+  const cleanTitle = String(title || "FEI XMD download").replace(/[\r\n*_\x60~]/g, " ").trim().slice(0, 150);
+  const details = [
+    "✅ *" + cleanTitle + "*",
+    item.quality ? "✨ Quality: " + String(item.quality).slice(0, 50) : "",
+    item.size ? "📦 Size: " + String(item.size).slice(0, 50) : ""
+  ].filter(Boolean).join("\n");
+  const caption = unicodeBox("📥 DOWNLOAD READY", details, { footer: true });
+  const fileName = safeFileName(cleanTitle, "FEI-XMD-download") + (extension ? "." + extension : "");
+
   try {
     if (kind === "audio") {
-      await ctx.send({ audio: { url: resolved.url }, mimetype: "audio/mpeg", fileName, ptt: false });
-    } else if (kind === "image") {
-      await ctx.send({ image: { url: resolved.url }, caption: "*" + resolved.title + "*" });
+      await ctx.send({ audio: { url }, mimetype: "audio/mpeg", fileName, ptt: false });
     } else if (kind === "video") {
-      await ctx.send({ video: { url: resolved.url }, mimetype: "video/mp4", caption: "*" + resolved.title + "*" });
+      await ctx.send({ video: { url }, mimetype: "video/mp4", caption });
+    } else if (kind === "image") {
+      await ctx.send({ image: { url }, caption });
     } else {
-      await ctx.send({ document: { url: resolved.url }, fileName, mimetype: "application/octet-stream" });
+      await ctx.send({ document: { url }, fileName, mimetype: "application/octet-stream", caption });
     }
+    if (kind === "audio") await ctx.reply(caption);
   } catch {
-    await ctx.reply("I could not attach the file, so here is the direct link:\n" + resolved.url);
+    await ctx.reply(caption + "\n\n🔗 Direct download:\n" + url);
   }
 }
 
-async function viaAio(ctx, label) {
-  const hosts = Object.values(PLATFORM_HOSTS).flat();
-  const url = requirePlatformUrl(ctx.args, label, hosts);
-  await ctx.typing(1000);
-  const resolved = await resolveAllInOne(url);
-  await deliver(ctx, resolved);
+async function runAio(ctx, sourceUrl, label = "ALL-IN-ONE") {
+  await ctx.reply(unicodeBox("📥 " + label + " DOWNLOAD",
+    "🔗 Source: " + sourceUrl + "\n\nFetching available media formats...", { footer: false }));
+  const params = { url: sourceUrl };
+  if (AIO_KEY) params.apikey = AIO_KEY;
+
+  const payload = await requestExternalJson(AIO_API, params, 90000);
+  const data = responseData(payload);
+  if (payload?.success === false || payload?.status === false || data?.success === false || data?.status === false) {
+    throw new Error("The download provider could not process that link.");
+  }
+  const selected = chooseMedia(data);
+  if (!selected) throw new Error("The provider did not return a valid HTTPS media URL.");
+  await sendDownloadedMedia(ctx, selected.url, data.title || data.source || "Media download", selected.item);
 }
 
-// Shared song pipeline, in order of quality:
-// 1. JioSaavn when the official artist is verified — the real track, up to 320kbps.
-// 2. YouTube via NABEES (always on; the free key works, a personal key only
-//    raises quota) — a real YouTube search and convert.
-// 3. Audius: the artist's own full uploads, up to 320 kbps.
-// 4. Keyless YouTube audio as the final rescue.
-// The flow stays silent until bytes are in hand: one "Song found" line, then
-// the audio. No search chatter, no preview fallback — a 30-second preview is
-// not the song, and pretending otherwise is exactly what must never ship.
-async function sendAudioBuffer(ctx, song) {
-  const name = song.artist ? song.artist + " - " + song.title : song.title;
-  await ctx.send({ audio: song.buffer, mimetype: "audio/mp4", fileName: cleanTitle(name) + ".m4a", ptt: false });
-}
+async function runYouTubeSearch(ctx) {
+  const query = String(ctx.args || "").trim();
+  if (!query) throw new Error("Usage: " + ctx.config.prefix + "ytsearch song title or creator");
+  if (query.length > 200) throw new Error("Keep the search under 200 characters.");
 
-async function sendAudioUrl(ctx, url, title) {
-  await ctx.send({ audio: { url }, mimetype: "audio/mpeg", fileName: cleanTitle(title) + ".mp3", ptt: false });
-}
-
-// One line, nothing else: what matched. The audio follows immediately.
-async function announceFound(ctx, song) {
-  const name = song.artist ? song.artist + " — " + song.title : song.title;
-  await ctx.reply("✅ Song found: " + name);
-}
-
-async function sendSong(ctx, query) {
-  const { searchSong, downloadSong } = await import("../src/saavn.js");
-  const { audiusFullTrack } = await import("../src/audius.js");
-  const { identifyTrack, fetchBuffer, searchQuality } = await import("../src/apis.js");
-  // Silent until bytes are in hand — no "searching" filler, no step-by-step
-  // narration. The first thing the chat sees is the found line, then audio.
-  const identified = await identifyTrack(query).catch(() => null);
-  let song = null;
-  try {
-    song = await searchSong(query, identified); // metadata first — bytes only after the found line
-  } catch {
-    song = null;
-  }
-  if (song && (song.artistVerified || !song.expectedArtist) && searchQuality(query, song) === "strong") {
-    try {
-      const full = await downloadSong(query, song);
-      await announceFound(ctx, song);
-      await ctx.typing(800);
-      return sendAudioBuffer(ctx, full);
-    } catch {
-      /* the library copy failed to transfer — move on quietly */
-    }
-  }
-  // A fuzzy match for a mistyped name is not a confirmation: a weak match
-  // moves on quietly instead of announcing the wrong song as found.
-  // YouTube via NABEES comes next — a real YouTube search and convert, the
-  // most reliable full-track source there is. It is ALWAYS on: the free
-  // NABEES key works, a personal NABEES_API_KEY only raises the quota. A
-  // missing key must never switch the service off again. When even the
-  // rescue route refuses, the final error says so plainly — the shared key's
-  // daily quota is the usual reason, and "try again soon" is honest there.
-  let rescueRefused = false;
-  try {
-    const found = await searchYouTubeNabees(query);
-    const audio = await resolveYouTubeAudioNabees(found.url);
-    const buffer = await fetchBuffer(audio.url, { timeoutMs: 60000, label: "rescue stream" });
-    if (buffer.length < 150 * 1024) throw new Error("the rescue stream came back broken");
-    await announceFound(ctx, { title: audio.title || found.title });
-    await ctx.typing(800);
-    return await ctx.send({ audio: buffer, mimetype: "audio/mpeg", fileName: cleanTitle(audio.title || found.title) + ".mp3", ptt: false });
-  } catch {
-    rescueRefused = true;
-    /* keep trying */
-  }
-  // Audius: the artist's own full uploads, up to 320 kbps. The gate is the
-  // uploader name — a remix published by another artist never passes. The
-  // bytes come home verified: bare URL sends are how truncated audio happened.
-  try {
-    const aud = await audiusFullTrack(query, identified?.artist);
-    if (aud) {
-      const buffer = await fetchBuffer(aud.url, { timeoutMs: 60000, label: "artist upload" });
-      if (buffer.length >= 150 * 1024) {
-        await announceFound(ctx, { title: aud.title, artist: aud.artist, duration: aud.duration });
-        await ctx.typing(800);
-        return await ctx.send({ audio: buffer, mimetype: "audio/mpeg", fileName: cleanTitle(aud.artist + " - " + aud.title) + ".mp3", ptt: false });
-      }
-    }
-  } catch {
-    /* keep trying */
-  }
-  try {
-    const result = await searchYouTubeAudio(query);
-    await announceFound(ctx, { title: result.title });
-    await ctx.typing(800);
-    return await ctx.send({ audio: result.buffer, mimetype: "audio/mpeg", fileName: cleanTitle(result.title) + ".mp3", ptt: false });
-  } catch {
-    /* keep trying */
-  }
-  throw new Error(
-    "No clean copy of *" + query + "* right now — every source is refusing that one. " +
-    (rescueRefused
-      ? "The YouTube rescue route is busy today — it usually frees up within a day, so try again soon."
-      : "Try again soon.")
+  await ctx.reply("🔎 Searching YouTube for: " + query);
+  const payload = await requestExternalJson(
+    "https://eliteprotech-apis.zone.id/search/ytsearch",
+    { q: query },
+    45000
   );
+  const videos = Array.isArray(payload?.results?.videos) ? payload.results.videos :
+    Array.isArray(payload?.videos) ? payload.videos : [];
+  if (!videos.length) throw new Error("No YouTube results were returned.");
+
+  const lines = videos.slice(0, 5).map((video, index) => {
+    const title = String(video?.title || "Untitled").replace(/[\r\n*_\x60~]/g, " ").slice(0, 150);
+    const author = String(video?.author?.name || video?.author || "Unknown creator").replace(/[\r\n]/g, " ").slice(0, 80);
+    let link = "";
+    try {
+      const url = new URL(String(video?.url || ""));
+      if (url.protocol === "https:" && ["youtube.com", "www.youtube.com", "youtu.be"].includes(url.hostname.toLowerCase())) {
+        link = url.toString();
+      }
+    } catch {}
+    return [
+      (index + 1) + ". *" + title + "*",
+      "👤 " + author,
+      video?.duration ? "⏱ " + String(video.duration).slice(0, 30) : "",
+      link ? "🔗 " + link : ""
+    ].filter(Boolean).join("\n");
+  });
+  await ctx.reply(unicodeBox("🔎 YOUTUBE RESULTS", lines.join("\n\n"), { footer: true }));
+}
+
+async function runYouTubeVideo(ctx) {
+  const url = requirePlatformUrl(ctx, "YouTube", PLATFORM_HOSTS.ytmp4);
+  await ctx.reply("🎬 Preparing the YouTube video download...");
+  const payload = await requestApiJson("ytv", { url }, 90000);
+  const data = payload?.results || payload?.result || payload?.data || {};
+  const downloadUrl = safeMediaUrl(data.downloadUrl || data.download || data.url, "video");
+  if (!downloadUrl) throw new Error("No valid video download URL was returned.");
+  await sendDownloadedMedia(ctx, downloadUrl, data.title || "YouTube video", {
+    type: "video/mp4",
+    extension: "mp4",
+    quality: data.quality || "available"
+  });
 }
 
 export default [
   {
     name: "aio",
     category: "Downloads",
-    description: "download from any supported link",
-    run: async ctx => viaAio(ctx, "media")
-  },
-  {
-    name: "tiktok",
-    aliases: ["tt", "ttdl"],
-    category: "Downloads",
-    description: "download a TikTok video",
+    description: "Download supported public media links through the NabeesTech all-in-one provider.",
     run: async ctx => {
-      const url = requirePlatformUrl(ctx.args, "TikTok", PLATFORM_HOSTS.tiktok);
-      await ctx.typing(1000);
-      await deliver(ctx, await resolveAllInOne(url));
-    }
-  },
-  {
-    name: "tiktok2",
-    category: "Downloads",
-    description: "download a TikTok video (backup service)",
-    run: async ctx => {
-      const url = requirePlatformUrl(ctx.args, "TikTok", PLATFORM_HOSTS.tiktok);
-      await ctx.typing(1000);
-      const { fetchJson } = await import("../src/utils.js");
-      const payload = await fetchJson("https://tikwm.com/api/?url=" + encodeURIComponent(url), {
-        timeoutMs: 90000,
-        label: "TikTok service"
-      });
-      const data = payload?.data || {};
-      const video = String(data?.play || data?.hdplay || "").trim();
-      if (!/^https:\/\//.test(video)) throw new Error("the backup service found no file for that link");
-      await ctx.send({ video: { url: video }, mimetype: "video/mp4", caption: "*" + cleanTitle(data?.title || "TikTok video") + "*" });
-      if (data?.music && /^https:\/\//.test(String(data.music))) {
-        await ctx.send({ audio: { url: data.music }, mimetype: "audio/mpeg", ptt: false });
-      }
-    }
-  },
-  {
-    name: "insta",
-    aliases: ["ig", "instagram"],
-    category: "Downloads",
-    description: "download Instagram media",
-    run: async ctx => {
-      const url = requirePlatformUrl(ctx.args, "Instagram", PLATFORM_HOSTS.instagram);
-      await ctx.typing(1000);
-      await deliver(ctx, await resolveAllInOne(url));
+      const url = requirePlatformUrl(ctx, "supported media", [
+        ...PLATFORM_HOSTS.fb, ...PLATFORM_HOSTS.twitter, ...PLATFORM_HOSTS.instagram,
+        ...PLATFORM_HOSTS.ytmp4, ...PLATFORM_HOSTS.tiktok
+      ]);
+      await runAio(ctx, url);
     }
   },
   {
     name: "fb",
     category: "Downloads",
-    description: "download a Facebook video",
-    run: async ctx => {
-      const url = requirePlatformUrl(ctx.args, "Facebook", PLATFORM_HOSTS.facebook);
-      await ctx.typing(1000);
-      await deliver(ctx, await resolveAllInOne(url));
-    }
+    description: "Download a Facebook video using the all-in-one media provider.",
+    run: async ctx => runAio(ctx, requirePlatformUrl(ctx, "Facebook", PLATFORM_HOSTS.fb), "FACEBOOK")
   },
   {
     name: "twitter",
-    aliases: ["x"],
     category: "Downloads",
-    description: "download an X/Twitter video",
-    run: async ctx => {
-      const url = requirePlatformUrl(ctx.args, "X/Twitter", PLATFORM_HOSTS.twitter);
-      await ctx.typing(1000);
-      await deliver(ctx, await resolveAllInOne(url));
-    }
+    description: "Download a public X/Twitter video using the all-in-one media provider.",
+    run: async ctx => runAio(ctx, requirePlatformUrl(ctx, "X/Twitter", PLATFORM_HOSTS.twitter), "X / TWITTER")
   },
   {
-    name: "yt",
-    aliases: ["video", "ytmp4"],
+    name: "instagram",
     category: "Downloads",
-    description: "download a YouTube video",
-    run: async ctx => {
-      const url = requirePlatformUrl(ctx.args, "YouTube", PLATFORM_HOSTS.youtube);
-      await ctx.typing(1000);
-      let resolved;
-      try {
-        resolved = await resolveYouTubeVideo(url);
-      } catch (error) {
-        if (String(process.env.NABEES_API_KEY || "").trim()) {
-          resolved = await resolveAllInOne(url);
-        } else {
-          throw new Error(
-            "every YouTube route refused me on that link just now — try it again in a little while"
-          );
-        }
-      }
-      await deliver(ctx, resolved);
-    }
+    description: "Download public Instagram media using the all-in-one media provider.",
+    run: async ctx => runAio(ctx, requirePlatformUrl(ctx, "Instagram", PLATFORM_HOSTS.instagram), "INSTAGRAM")
   },
   {
-    name: "song",
-    aliases: ["play", "music"],
+    name: "ytmp4",
+    aliases: ["yt", "ytdl"],
     category: "Downloads",
-    description: "send any song as a full audio file",
+    description: "Download public YouTube media using the all-in-one media provider.",
+    run: async ctx => runAio(ctx, requirePlatformUrl(ctx, "YouTube", PLATFORM_HOSTS.ytmp4), "YOUTUBE")
+  },
+  {
+    name: "tiktok",
+    aliases: ["ttdl"],
+    category: "Downloads",
+    description: "Download public TikTok media using the all-in-one media provider.",
+    run: async ctx => runAio(ctx, requirePlatformUrl(ctx, "TikTok", PLATFORM_HOSTS.tiktok), "TIKTOK")
+  },
+  {
+    name: "play2",
+    aliases: ["song", "music"],
+    aliases: ["song"],
+    category: "Downloads",
+    description: "Search YouTube and send the matching track as MP3 using Ikyyxd.",
     run: async ctx => {
       const query = String(ctx.args || "").trim();
-      if (!query) throw new Error("tell me the song or artist name");
-      await ctx.typing(1200);
-      await sendSong(ctx, query);
+      if (!query) throw new Error("Usage: " + ctx.config.prefix + "play2 song title or artist");
+      await ctx.reply("🎵 Searching YouTube and preparing the audio...");
+      const result = await searchYouTubeAudio(query);
+      await sendDownloadedMedia(ctx, result.audioUrl, result.title, {
+        type: "audio/mpeg",
+        extension: "mp3"
+      });
     }
   },
   {
     name: "ytsearch",
     category: "Downloads",
-    description: "search YouTube without downloading",
-    run: async ctx => {
-      const query = String(ctx.args || "").trim();
-      if (!query) throw new Error("tell me what to search for");
-      await ctx.typing(900);
-      const videos = await searchYouTube(query);
-      if (!videos.length) throw new Error("nothing came back for that search");
-      const lines = videos.map((video, index) =>
-        (index + 1) + ". *" + video.title + "*\n" +
-        (video.author ? "   " + video.author : "") +
-        (video.duration ? " · " + video.duration : "") +
-        "\n   " + video.url
-      );
-      await ctx.reply("Here is what I found:\n\n" + lines.join("\n\n"));
-    }
+    description: "Search YouTube and list matching videos without downloading them.",
+    run: runYouTubeSearch
+  },
+  {
+    name: "video",
+    category: "Downloads",
+    description: "Download a YouTube video using the FEI API.",
+    run: runYouTubeVideo
   }
 ];

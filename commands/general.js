@@ -1,416 +1,174 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { botImageMedia } from "../src/utils.js";
+import { buildMenu } from "../lib/menu.js";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const APP_VERSION = (() => {
-  try { return String(JSON.parse(fs.readFileSync(path.join(here, "../package.json"), "utf8")).version); }
-  catch { return "dev"; }
-})();
-
-// The menu boxes. DamzD's own look, drawn the same way the classic megabots
-// draw theirs: a header block with the live version, prefix and loaded
-// command count, then one box per section, then the brand line.
-const BOX_TOP = "╭──〔 ";
-const BOX_LINE = "│  ";
-const BOX_BOTTOM = "╰────────────────";
-const MENU_ENDING = "✦ " + mbold("POWERED BY GREAT DAMZD");
-
-const ICONS = {
-  General: "🤖",
-  "AI & Chat": "💬",
-  "AI Media": "🎨",
-  News: "📰",
-  Downloads: "📥",
-  Games: "🎮",
-  Fun: "🎉",
-  Group: "👥",
-  Canvas: "🖼",
-  Tools: "🛠",
-  Privacy: "🔒",
-  Status: "📱",
-  Channel: "📢",
-  Owner: "👑"
-};
-
-// Mathematical Sans-Serif Bold — 𝗹𝗶𝗸𝗲 𝘁𝗵𝗶𝘀. Plain punctuation (spaces,
-// dots, dashes, &) passes through untouched.
-function mbold(text) {
-  return String(text).split("").map(ch => {
-    const code = ch.codePointAt(0);
-    if (code >= 65 && code <= 90) return String.fromCodePoint(0x1d5d4 + code - 65);
-    if (code >= 97 && code <= 122) return String.fromCodePoint(0x1d5ee + code - 97);
-    if (code >= 48 && code <= 57) return String.fromCodePoint(0x1d7ec + code - 48);
-    return ch;
-  }).join("");
-}
-
-function capitalize(text) {
-  return String(text || "").charAt(0).toUpperCase() + String(text || "").slice(1);
-}
-
-function groupedCategories(commands) {
-  const categories = new Map();
-  for (const command of commands) {
-    if (command.hidden) continue;
-    const list = categories.get(command.category) || [];
-    list.push(command);
-    categories.set(command.category, list);
-  }
-  return categories;
-}
-
-function sectionTitle(category) {
-  return BOX_TOP + (ICONS[category] || "•") + " " + mbold(String(category).toUpperCase()) + " 〕";
-}
-
-// Everything registered, aliases included — that is what "loaded" means here.
-function loadedCount(commands) {
-  return commands.reduce((total, command) => total + 1 + (command.aliases?.length || 0), 0);
-}
-
-function menuHeader(commands, config) {
-  return [
-    BOX_TOP + config.name + " 〕",
-    BOX_LINE + "◇ " + mbold("VERSION") + ": " + APP_VERSION,
-    BOX_LINE + "◇ " + mbold("OWNER") + ": " + (config.ownerName || "the owner"),
-    BOX_LINE + "◇ " + mbold("MODE") + ": " + String(config.accessMode || "self").toUpperCase(),
-    BOX_LINE + "◇ " + mbold("UPTIME") + ": " + uptimeText(),
-    BOX_LINE + "◇ " + mbold("COMMANDS LOADED") + ": " + loadedCount(commands),
-    "│"
-  ].join("\n");
-}
-
-function buildCategoryOverview(commands, config) {
-  const categories = groupedCategories(commands);
-  const lines = [menuHeader(commands, config)];
-  lines.push(BOX_TOP + "⌂ " + mbold("SECTIONS") + " 〕");
-  for (const [category, list] of categories.entries()) {
-    lines.push(BOX_LINE + "› " + (ICONS[category] || "•") + " " +
-      mbold(String(category).toUpperCase()) + " — " + list.length +
-      (list.length === 1 ? " command" : " commands"));
-  }
-  lines.push(
-    BOX_BOTTOM,
-    "",
-    "Send " + config.prefix + "menu <section> to open one — e.g. " + config.prefix + "menu news.",
-    "Beyond commands: just talk to me in a normal message and I will reply like a person would.",
-    "Send me a TikTok, YouTube, Instagram or Facebook link and I will fetch the media for you."
-  );
-  return lines.join("\n") + "\n\n" + MENU_ENDING;
-}
-
-// The bot's picture and the menu text go out as ONE message — the picture
-// with the text as its caption, the way the big menus deliver. The picture
-// is compressed first so it auto-loads on mobile data instead of sitting
-// there as a "Photo" the human has to tap. A missing or broken picture never
-// blocks the text: it degrades to the split send, then to a plain reply.
-async function sendMenuWithImage(ctx, text) {
-  const payload = await botImageMedia(ctx.config);
-  if (payload) {
-    try {
-      await ctx.send({ ...payload, caption: text });
-      return;
-    } catch { /* fall through to the split send */ }
-    try { await ctx.send(payload); } catch { /* decorative */ }
-  }
-  await ctx.replyOnce(text);
-}
-
-// The connect note sent to the owner's own chat when the bot comes online —
-// the menu's look, one message.
-export function connectNote(config) {
-  return [
-    BOX_TOP + "⚡ " + config.name + " 〕",
-    BOX_LINE + "◇ " + mbold("STATUS") + ": connected and online ✅",
-    BOX_LINE + "◇ " + mbold("VERSION") + ": " + APP_VERSION,
-    BOX_LINE + "◇ " + mbold("OWNER") + ": " + (config.ownerName || "the owner"),
-    BOX_LINE + "◇ " + mbold("MODE") + ": " + String(config.accessMode || "self").toUpperCase(),
-    BOX_LINE + "◇ " + mbold("UPTIME") + ": " + uptimeText(),
-    BOX_LINE + "◇ " + mbold("PREFIX") + ": " + config.prefix,
-    BOX_LINE + "◇ " + mbold("MY TIME") + ": " + lagosTime() + " (WAT)",
-    "│",
-    BOX_BOTTOM,
-    "",
-    "I am online and linked to this account. Talk to me in normal words, or send " + config.prefix + "menu to see everything I can do.",
-    "",
-    MENU_ENDING
-  ].join("\n");
-}
-
-function buildFullList(commands, config) {
-  const boxes = [menuHeader(commands, config)];
-  for (const [category, list] of groupedCategories(commands).entries()) {
-    boxes.push(sectionTitle(category));
-    for (const command of list) {
-      boxes.push(BOX_LINE + "› " + config.prefix + command.name + " — " + capitalize(command.description));
-    }
-    boxes.push(BOX_BOTTOM);
-  }
-  boxes.push("", "And you can always just talk to me normally.", "", MENU_ENDING);
-  return boxes.join("\n");
-}
-
-function buildCommandDetail(commands, config, wanted) {
-  const lower = String(wanted || "").toLowerCase().replace(/^\./, "").trim();
-  for (const command of commands) {
-    if (command.hidden) continue;
-    const names = [command.name, ...(command.aliases || [])];
-    if (!names.includes(lower)) continue;
-    const lines = [
-      BOX_TOP + (ICONS[command.category] || "•") + " " + config.prefix + mbold(command.name.toUpperCase()) + " 〕",
-      BOX_LINE + "› " + capitalize(command.description),
-      BOX_LINE + "› " + mbold("CATEGORY") + ": " + command.category
-    ];
-    if ((command.aliases || []).length) {
-      lines.push(BOX_LINE + "› " + mbold("ALSO") + ": " + command.aliases.map(a => config.prefix + a).join(", "));
-    }
-    lines.push(BOX_BOTTOM);
-    return lines.join("\n");
-  }
-  return null;
-}
-
-function buildSection(commands, config, wanted) {
-  const lower = String(wanted || "").trim().toLowerCase();
-  const matches = new Map();
-  for (const command of commands) {
-    if (command.hidden) continue;
-    if (command.category.toLowerCase() === lower) {
-      matches.set(command.category, [...(matches.get(command.category) || []), command]);
-    }
-  }
-  if (!matches.size) return null;
-  const boxes = [];
-  for (const [category, list] of matches.entries()) {
-    boxes.push(sectionTitle(category));
-    for (const command of list) {
-      boxes.push(BOX_LINE + "› " + config.prefix + command.name + " — " + capitalize(command.description));
-    }
-    boxes.push(BOX_BOTTOM);
-  }
-  return boxes.join("\n") + "\n\n" + MENU_ENDING;
-}
-
-function lagosTime() {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Africa/Lagos",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true
-  }).format(new Date());
-}
-
-function lagosDate() {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Africa/Lagos",
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric"
-  }).format(new Date());
-}
-
-function ownerVCard(config) {
-  const number = String(config.ownerNumbers[0] || "");
-  return [
-    "BEGIN:VCARD",
-    "VERSION:3.0",
-    "FN:" + config.ownerName,
-    "TEL;type=CELL;type=VOICE;waid=" + number + ":+" + number,
-    "NOTE:Owner of the " + config.name + " assistant",
-    "END:VCARD"
-  ].join("\n");
-}
-
-function uptimeText() {
-  const seconds = Math.floor(process.uptime());
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
+function formatDuration(seconds) {
+  let remaining = Math.max(0, Math.floor(Number(seconds) || 0));
+  const days = Math.floor(remaining / 86400);
+  remaining %= 86400;
+  const hours = Math.floor(remaining / 3600);
+  remaining %= 3600;
+  const minutes = Math.floor(remaining / 60);
+  const secs = remaining % 60;
   const parts = [];
   if (days) parts.push(days + "d");
   if (hours) parts.push(hours + "h");
-  parts.push(minutes + "m");
+  if (minutes) parts.push(minutes + "m");
+  if (secs || !parts.length) parts.push(secs + "s");
   return parts.join(" ");
 }
 
-export default [
+function messageTimestampMs(message) {
+  const raw = message && message.messageTimestamp;
+  const value = raw && typeof raw.toNumber === "function" ? raw.toNumber() : Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return value > 1000000000000 ? value : value * 1000;
+}
+
+function ownerNumber(config) {
+  const owners = Array.isArray(config.ownerNumbers) ? config.ownerNumbers : [];
+  return String(owners[0] || "").replace(/\D/g, "");
+}
+
+const commands = [
   {
     name: "menu",
-    aliases: ["sections"],
+    aliases: ["helpme"],
     category: "General",
-    description: "show my sections at a glance",
+    description: "Show the branded FEI XMD menu and available command sections.",
     run: async ctx => {
-      const wanted = String(ctx.args || "").trim();
-      const section = wanted ? buildSection(ctx.commands, ctx.config, wanted) : null;
-      if (wanted && !section) {
-        await ctx.reply(
-          "I do not have a section called *" + wanted + "*. Send " + ctx.config.prefix + "menu to see the list of sections."
-        );
-        return;
+      const menu = buildMenu({ commands: ctx.commands, config: ctx.config, theme: ctx.theme });
+      if (ctx.config.imageUrl) {
+        try {
+          await ctx.send({
+            image: { url: ctx.config.imageUrl },
+            caption: "🤖 *FEI XMD — WhatsApp Bot by Benfei Tech*\n" +
+              "Official pairing portal: " + ctx.config.botUrl + "\n" +
+              "⚡ Powered by Benfei Tech"
+          });
+        } catch (error) {
+          console.warn("FEI XMD menu artwork could not be sent; using the text menu:", error?.message || error);
+        }
       }
-      await sendMenuWithImage(ctx, section || buildCategoryOverview(ctx.commands, ctx.config));
+      await ctx.reply(menu);
     }
   },
   {
     name: "help",
-    aliases: ["commands", "allcommands", "cmds"],
     category: "General",
-    description: "the full list of every command and what it does",
+    description: "List registered commands and their descriptions.",
     run: async ctx => {
-      const wanted = String(ctx.args || "").trim();
-      if (!wanted) {
-        await sendMenuWithImage(ctx, buildFullList(ctx.commands, ctx.config));
-        return;
+      const rows = (ctx.commands || [])
+        .filter(command => !command.hidden)
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(command => ctx.config.prefix + command.name + (command.description ? " — " + command.description : ""));
+      const header = "📚 FEI XMD HELP\n" + rows.length + " registered commands\n\n";
+      const chunks = [];
+      let current = header;
+      for (const row of rows) {
+        if (current.length + row.length + 1 > 3300) {
+          chunks.push(current.trimEnd());
+          current = "📚 FEI XMD HELP (continued)\n\n";
+        }
+        current += row + "\n";
       }
-      const detail = buildCommandDetail(ctx.commands, ctx.config, wanted);
-      if (detail) {
-        await ctx.reply(detail);
-        return;
-      }
-      const section = buildSection(ctx.commands, ctx.config, wanted);
-      if (section) {
-        await ctx.reply(section);
-        return;
-      }
-      await ctx.reply(
-        "I do not know *" + wanted + "*. Send " + ctx.config.prefix + "help for everything I understand."
-      );
+      if (current.trim()) chunks.push(current.trimEnd());
+      for (const chunk of chunks) await ctx.reply(chunk);
     }
   },
   {
     name: "ping",
     category: "General",
-    description: "check that I am online",
+    description: "Check bot responsiveness and estimated message response time.",
     run: async ctx => {
-      await ctx.reply(
-        BOX_TOP + "⚡ " + mbold("PING") + " 〕\n" +
-        BOX_LINE + "› " + mbold("STATUS") + ": alive and answering 🟢\n" +
-        BOX_LINE + "› " + mbold("UPTIME") + ": " + uptimeText() + "\n" +
-        BOX_LINE + "› " + mbold("VERSION") + ": " + APP_VERSION + "\n" +
-        BOX_BOTTOM + "\n" + MENU_ENDING
-      );
+      const timestamp = messageTimestampMs(ctx.msg);
+      const responseMs = timestamp === null ? null : Math.max(0, Date.now() - timestamp);
+      await ctx.reply([
+        "╭━━〔 🏓 FEI XMD · PONG 〕━━┈⊷",
+        "┃ ✦ Status: " + (ctx.connectionOpen ? "Online 🟢" : "Connecting 🟡"),
+        "┃ ✦ Response: " + (responseMs === null ? "Unavailable" : responseMs + " ms"),
+        "┃ ✦ Uptime: " + formatDuration(process.uptime()),
+        "┃ ✦ Version: " + ctx.config.version,
+        "╰━━━━━━━━━━━━━━━━━━━━━━┈⊷"
+      ].join("\n"));
     }
   },
   {
     name: "alive",
     aliases: ["uptime"],
     category: "General",
-    description: "my status card",
+    description: "Show bot status, mode and uptime.",
     run: async ctx => {
       await ctx.reply(
-        "🤖 *" + ctx.config.name + "* is online\n" +
-        "⏱ Uptime: " + uptimeText() + "\n" +
-        "📚 Commands: " + (ctx.commands?.length || 0) + "\n" +
-        "🔐 Mode: " + ctx.config.accessMode + "\n" +
-        "⏰ My time: " + lagosTime() + " (WAT)"
-      );
-    }
-  },
-  {
-    name: "about",
-    category: "General",
-    description: "who I am",
-    run: async ctx => {
-      await ctx.reply(
-        "I am " + ctx.config.name + ", " + ctx.config.ownerName + "'s personal assistant on WhatsApp. " +
-        "Ask me things, send me links, or just talk — I keep up."
+        "✅ " + ctx.config.name + " is " + (ctx.connectionOpen ? "online." : "connecting.") +
+        "\n🔐 Mode: " + String(ctx.mode || "public").toUpperCase() +
+        "\n⏱️ Uptime: " + formatDuration(process.uptime()) +
+        "\n⚡ Powered by " + ctx.config.ownerName
       );
     }
   },
   {
     name: "owner",
     category: "General",
-    description: "show my owner's details",
+    description: "Show Benfei Tech owner details.",
     run: async ctx => {
+      const number = ownerNumber(ctx.config);
       await ctx.reply(
-        "👑 *" + ctx.config.ownerName + "* is my owner.\n" +
-        "I was set up for personal use, so I keep things quiet and clean."
+        "👑 Owner: " + ctx.config.ownerName +
+        (number ? "\n📱 Owner number: +" + number : "")
       );
     }
   },
   {
     name: "support",
     category: "General",
-    description: "how to get help with me",
+    description: "Show support guidance for FEI XMD.",
     run: async ctx => {
       await ctx.reply(
-        "If something misbehaves, tell " + ctx.config.ownerName + " directly — I belong to them. " +
-        "You can also send " + ctx.config.prefix + "menu to see what I understand."
+        "🛟 " + ctx.config.name + " Support\nFor setup help or bug reports, contact " +
+        ctx.config.ownerName + ".\n\nGitHub: https://github.com/Benfeitech/FEI-XMD"
       );
-    }
-  },
-  {
-    name: "channel",
-    category: "General",
-    description: "info about this assistant",
-    run: async ctx => {
-      await ctx.reply(
-        ctx.config.name + " is a private assistant — there is no public channel to follow. " +
-        "Everything I do happens right here in your chats."
-      );
-    }
-  },
-  {
-    name: "channeljid",
-    category: "General",
-    description: "get the JID of this chat or a channel link",
-    run: async ctx => {
-      const arg = String(ctx.args || "").trim();
-      if (arg) {
-        const code = arg.match(/whatsapp\.com\/channel\/([A-Za-z0-9_-]+)/)?.[1]
-          || arg.match(/@newsletter/ ? arg : "")
-          || arg;
-        await ctx.reply(
-          "Channel invite code: *" + code + "*\n" +
-          "Tip: open the channel here and send " + ctx.config.prefix + "channeljid again without a link — I will read the JID from the chat itself."
-        );
-        return;
-      }
-      await ctx.reply("This chat's JID: `" + ctx.jid + "`");
-    }
-  },
-  {
-    name: "vcf",
-    aliases: ["contactgain"],
-    category: "General",
-    description: "save my owner's contact card",
-    run: async ctx => {
-      await ctx.send({
-        contacts: {
-          displayName: ctx.config.ownerName,
-          contacts: [{ vcard: ownerVCard(ctx.config) }]
-        }
-      });
     }
   },
   {
     name: "time",
     category: "General",
-    description: "my owner's local time",
+    description: "Show the current server time in Nigeria.",
     run: async ctx => {
-      await ctx.reply("It is *" + lagosTime() + "* right now (WAT).");
+      const value = new Intl.DateTimeFormat("en-NG", {
+        timeZone: "Africa/Lagos",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true
+      }).format(new Date());
+      await ctx.reply("🕒 Nigeria time: " + value);
     }
   },
   {
     name: "date",
     category: "General",
-    description: "today's date",
+    description: "Show the current date in Nigeria.",
     run: async ctx => {
-      await ctx.reply("Today is *" + lagosDate() + "*.");
+      const value = new Intl.DateTimeFormat("en-NG", {
+        timeZone: "Africa/Lagos",
+        weekday: "long",
+        day: "2-digit",
+        month: "long",
+        year: "numeric"
+      }).format(new Date());
+      await ctx.reply("📅 Date in Nigeria: " + value);
     }
   },
   {
     name: "version",
     category: "General",
-    description: "my version and status",
+    description: "Show FEI XMD version and connection status.",
     run: async ctx => {
       await ctx.reply(
-        "📦 " + ctx.config.name + " v1.1.0\n" +
-        "Status: online, " + (ctx.commands?.length || 0) + " commands loaded\n" +
-        "Uptime: " + uptimeText()
+        "🤖 " + ctx.config.name + " v" + ctx.config.version +
+        "\n🟢 Status: " + (ctx.connectionOpen ? "Online" : "Connecting") +
+        "\n🔐 Mode: " + String(ctx.mode || "public").toUpperCase() +
+        "\n📦 Baileys: official WhiskeySockets npm package"
       );
     }
   },
@@ -418,24 +176,26 @@ export default [
     name: "jid",
     aliases: ["id"],
     category: "General",
-    description: "show chat and sender IDs",
+    description: "Show the current chat and message sender IDs.",
     run: async ctx => {
       await ctx.reply(
-        "Chat JID: `" + ctx.jid + "`\n" +
-        "Sender: `" + ctx.sender + "`"
+        "💬 Chat ID: " + ctx.jid +
+        "\n👤 Sender ID: " + (ctx.senderJid || "Unavailable")
       );
     }
   },
   {
     name: "whoami",
     category: "General",
-    description: "your sender information",
+    description: "Show your WhatsApp sender information.",
     run: async ctx => {
       await ctx.reply(
-        "You are @" + ctx.senderNumber + (ctx.pushName ? " (" + ctx.pushName + ")" : "") + ".\n" +
-        "Chat: " + (ctx.isGroup ? "a group" : "a private chat"),
-        { mentions: [ctx.sender] }
+        "👤 Name: " + (ctx.msg?.pushName || "Unknown") +
+        "\n🆔 Your ID: " + (ctx.senderJid || "Unavailable") +
+        "\n👑 Owner: " + (ctx.owner ? "Yes" : "No")
       );
     }
   }
 ];
+
+export default commands;
