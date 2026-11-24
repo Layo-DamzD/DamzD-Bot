@@ -39,8 +39,10 @@ function ownerChatJid(ctx) {
 
 // The official Baileys retry download (father-repo proven): the message is
 // downloaded with a reuploadRequest so a stripped quote or aged URL still
-// recovers while the sender's phone is online.
-async function retryDownload(ctx, key, message) {
+// recovers while the sender's phone is online. The original message
+// timestamp rides along — the media-retry IQ validates message age, and
+// FEI XMD (the father repo) always passes it.
+async function retryDownload(ctx, key, message, messageTimestamp = 0, errors = null, label = "") {
   try {
     const { downloadMediaMessage } = await import("@whiskeysockets/baileys");
     const buffer = await downloadMediaMessage(
@@ -51,19 +53,22 @@ async function retryDownload(ctx, key, message) {
           fromMe: Boolean(key.fromMe),
           ...(key.participant ? { participant: String(key.participant) } : {})
         },
-        message
+        message,
+        ...(Number(messageTimestamp) > 0 ? { messageTimestamp: Number(messageTimestamp) } : {})
       },
       "buffer",
       {},
       { reuploadRequest: ctx.sock.updateMediaMessage }
     );
     return Buffer.isBuffer(buffer) && buffer.length ? buffer : null;
-  } catch {
+  } catch (error) {
+    if (errors) errors.push((label || "download") + ": " + String(error?.message || error).slice(0, 110));
     return null;
   }
 }
 
 export async function recoverBuffer(ctx, cached, quoted, quotedKey = null) {
+  const errors = [];
   // 1) Bytes captured on arrival — instant, immune to the one-serving policy.
   const captured = readCachedMedia(cached);
   if (captured) return { buffer: captured, node: cached.node };
@@ -82,7 +87,18 @@ export async function recoverBuffer(ctx, cached, quoted, quotedKey = null) {
     fromMe: Boolean(cached?.fromMe),
     ...(cached?.sender ? { participant: String(cached.sender) } : {})
   } : fallbackKey;
-  // 2) The stashed full-metadata node.
+  // 2) THE FATHER-REPO PATH (FEI XMD — proven working in the field): the
+  //    official Baileys download straight off the quoted copy, original
+  //    timestamp attached, reupload hook wired. Baileys fights the
+  //    media-retry protocol INTERNALLY when the CDN says 404/410, so this
+  //    one call covers stripped quotes and aged URLs alike. Tried FIRST —
+  //    everything below only runs when this one says no.
+  if (quoted) {
+    const official = await retryDownload(ctx, fallbackKey, quoted,
+      Number(ctx.msg?.messageTimestamp || 0), errors, "quote");
+    if (official) return { buffer: official, node: null };
+  }
+  // 3) The stashed full-metadata node (what the bot actually received live).
   if (cached?.node) {
     try {
       const { downloadContentFromMessage } = await import("@whiskeysockets/baileys");
@@ -91,8 +107,11 @@ export async function recoverBuffer(ctx, cached, quoted, quotedKey = null) {
       for await (const chunk of stream) chunks.push(chunk);
       const buffer = Buffer.concat(chunks);
       if (buffer.length) return { buffer, node: cached.node };
-    } catch { /* the retry protocol is next */ }
-    // 3) The media-retry protocol: fresh node from WhatsApp + sender's phone.
+      errors.push("stash: empty stream");
+    } catch (error) {
+      errors.push("stash: " + String(error?.message || error).slice(0, 110));
+    }
+    // 4) The media-retry protocol: fresh node from WhatsApp + sender's phone.
     if (key.id) {
       const fresh = await refreshMediaLocation(ctx, key, cached.node);
       if (fresh) {
@@ -103,19 +122,22 @@ export async function recoverBuffer(ctx, cached, quoted, quotedKey = null) {
           for await (const chunk of stream) chunks.push(chunk);
           const buffer = Buffer.concat(chunks);
           if (buffer.length) return { buffer, node: fresh };
-        } catch { /* official path is next */ }
+          errors.push("refreshed: empty stream");
+        } catch (error) {
+          errors.push("refreshed: " + String(error?.message || error).slice(0, 110));
+        }
+      } else {
+        errors.push("refresh: no fresh location returned");
       }
-      // 4) Baileys' own reupload protocol.
-      const official = await retryDownload(ctx, key, { [cached.nodeKind || mediaNodeKeyOf(cached.kind)]: cached.node });
+      // 5) Baileys' own reupload protocol on the stashed node, last resort.
+      const official = await retryDownload(ctx, key, { [cached.nodeKind || mediaNodeKeyOf(cached.kind)]: cached.node },
+        Number(cached.ts || 0), errors, "stash-node");
       if (official) return { buffer: official, node: cached.node };
     }
   }
-  // 5) No cache at all — the quote itself may still carry the mediaKey.
-  if (quoted) {
-    const official = await retryDownload(ctx, key, quoted);
-    if (official) return { buffer: official, node: null };
-  }
-  return null;
+  // Every attempt is reported — the next field report tells us exactly what
+  // WhatsApp said instead of a flat "nothing worked".
+  return { failure: errors.slice(0, 3).join(" · ") || "no source had the bytes" };
 }
 
 async function refreshMediaLocation(ctx, key, node) {
@@ -197,20 +219,25 @@ export default [
       const kind = cached?.kind || mediaKindOf(unwrapMessage(qc.quoted));
       const nodeKind = mediaNodeKeyOf(kind);
       // The quote's participant is the ORIGINAL sender — the best retry key
-      // when the stash entry somehow lost its own.
+      // when the stash entry somehow lost its own. fromMe is COMPUTED, the
+      // v1.4.45 rule: forcing it false made every self-sent and LID-chat
+      // retry refused by the server.
+      const participant = normalizeJid(qc.info.participant || "");
+      const selfIds = [ctx.sock?.user?.id, ctx.sock?.user?.lid]
+        .map(normalizeJid).filter(Boolean);
       const quotedKey = {
         remoteJid: String(ctx.jid || ""),
         id: String(qc.info.stanzaId || ""),
-        fromMe: false,
-        ...(qc.info.participant ? { participant: normalizeJid(qc.info.participant) } : {})
+        fromMe: Boolean(participant && selfIds.includes(participant)),
+        ...(participant ? { participant } : {})
       };
       const result = await recoverBuffer(ctx, cached ? {
         ...cached,
         stanzaId: qc.info.stanzaId,
         nodeKind
       } : null, qc.quoted, quotedKey);
-      if (!result) {
-        await ctx.reply("⚠️ I saw that view-once, but WhatsApp would not hand the bytes back this time. If it is still un-opened, react 🔓 to it and I will try again while the sender is online.");
+      if (!result?.buffer) {
+        await ctx.reply("⚠️ I saw that view-once, but WhatsApp would not hand the bytes back this time.\nTried: " + (result?.failure || "no source had the bytes") + "\nIf it is still un-opened, react 🔓 to it and I will try again while the sender is online.");
         return;
       }
       await sendRecovered(ctx, kind, result.buffer, source, result.node);

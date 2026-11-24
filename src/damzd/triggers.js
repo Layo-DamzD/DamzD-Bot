@@ -27,8 +27,9 @@ function dotlessAllowed(name, definition) {
 }
 
 // The official Baileys retry download (father-repo proven): works from a
-// stripped quote or an aged URL while the sender's phone is online.
-async function retryDownload(sock, key, message) {
+// stripped quote or an aged URL while the sender's phone is online. The
+// original timestamp rides along — the media-retry IQ validates message age.
+async function retryDownload(sock, key, message, messageTimestamp = 0) {
   try {
     const { downloadMediaMessage } = await import("@whiskeysockets/baileys");
     const buffer = await downloadMediaMessage(
@@ -39,7 +40,8 @@ async function retryDownload(sock, key, message) {
           fromMe: Boolean(key.fromMe),
           ...(key.participant ? { participant: String(key.participant) } : {})
         },
-        message
+        message,
+        ...(Number(messageTimestamp) > 0 ? { messageTimestamp: Number(messageTimestamp) } : {})
       },
       "buffer",
       {},
@@ -98,7 +100,7 @@ async function recoverViewOnceBytes(sock, cached, key) {
       } catch { /* official path is next */ }
     }
     const nodeKind = cached.kind === "sticker" ? "stickerMessage" : cached.kind + "Message";
-    const official = await retryDownload(sock, key, { [nodeKind]: cached.node });
+    const official = await retryDownload(sock, key, { [nodeKind]: cached.node }, Number(cached.ts || 0));
     if (official) return official;
   }
   return null;
@@ -152,7 +154,7 @@ export async function handleDamzDTriggers({ sock, msg, jid, text, lookup, config
     const reaction = msg?.message?.reactionMessage;
     if (reaction?.text?.trim() && reaction?.key?.id) {
       await handleUnlockReaction({ sock, jid, reaction, config });
-      return;
+      return true;
     }
     const raw = String(text || "").trim();
     if (raw && lookup instanceof Map) {
@@ -167,9 +169,11 @@ export async function handleDamzDTriggers({ sock, msg, jid, text, lookup, config
           args: words.slice(1).join(" "),
           definition: lookup.get(head)
         });
+        return true;
       }
     }
   } catch {
     /* triggers are conveniences — a failure must never break the runtime */
   }
+  return false;
 }

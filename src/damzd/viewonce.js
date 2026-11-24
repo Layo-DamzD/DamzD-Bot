@@ -61,6 +61,9 @@ function stashMediaNode(msg, node, kind, wasViewOnce) {
     // whether the bot itself sent it (fromMe decides who is asked to re-serve).
     chat,
     fromMe: Boolean(msg?.key?.fromMe),
+    // The media-retry IQ validates message age — keep the original arrival
+    // timestamp so later official retries pass it (father-repo rule).
+    ts: Number(msg?.messageTimestamp || 0),
     // Capture diagnostics for .vvinfo: how many prefetch attempts ran and
     // what the last one said. NOT persisted (dropped in saveStash).
     captureAttempts: previous?.captureAttempts || 0,

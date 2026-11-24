@@ -181,6 +181,18 @@ test("the view-once payload never re-sends as view-once", async () => {
   assert.equal("viewOnce" in payload, false, "viewOnce flag must be stripped");
 });
 
+test("recoverBuffer reports what it tried instead of failing flat (v2.4.0)", async () => {
+  const { recoverBuffer } = await import("../commands/custom/damzd.js");
+  const ctx = {
+    jid: "2348000000000@s.whatsapp.net",
+    msg: { messageTimestamp: 1800000000 },
+    sock: { user: { id: "2348000000000@s.whatsapp.net" } }
+  };
+  const result = await recoverBuffer(ctx, null, null, null);
+  assert.ok(result && !result.buffer, "no source means no buffer");
+  assert.match(String(result?.failure || ""), /no source had the bytes/i);
+});
+
 test("withheld-content stubs never claim the dedup slot (v2.3.5)", async () => {
   const { isContentWithheldStub } = await import("../lib/whatsapp-runtime.js");
   // The exact shape Baileys upserts when WhatsApp withholds a view-once from

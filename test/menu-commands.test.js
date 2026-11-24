@@ -17,11 +17,11 @@ test("every command is registered without collisions and the pruned set is exact
   const { commands, lookup } = await loadCommands(path.resolve("commands"));
   const count = category => commands.filter(command => command.category === category).length;
 
-  assert.equal(commands.length, 183);
+  assert.equal(commands.length, 184);
   assert.equal(count("AI & Chat"), 10);
   assert.equal(count("AI Media"), 8);
   assert.equal(count("General"), 15);
-  assert.equal(count("Owner"), 2);
+  assert.equal(count("Owner"), 3); // + human mode toggle
   assert.equal(count("Canvas"), 2);
   assert.equal(count("Channel"), 8);
   assert.equal(count("Fun"), 20);

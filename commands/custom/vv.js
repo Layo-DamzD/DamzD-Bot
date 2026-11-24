@@ -163,8 +163,8 @@ async function recoverViewOnce(ctx) {
   if (!result?.buffer) {
     return {
       error: "I recognised this view-once, but WhatsApp would not hand the " +
-        "bytes back this time. Try again while the sender's phone is " +
-        "online — or react 🔓 to it."
+        "bytes back this time.\nTried: " + (result?.failure || "no source had the bytes") +
+        "\nTry again while the sender's phone is online — or react 🔓 to it."
     };
   }
 
