@@ -180,3 +180,29 @@ test("the view-once payload never re-sends as view-once", async () => {
   assert.equal(payload.mimetype, "image/jpeg");
   assert.equal("viewOnce" in payload, false, "viewOnce flag must be stripped");
 });
+
+test("withheld-content stubs never claim the dedup slot (v2.3.5)", async () => {
+  const { isContentWithheldStub } = await import("../lib/whatsapp-runtime.js");
+  // The exact shape Baileys upserts when WhatsApp withholds a view-once from
+  // this linked device: a CIPHERTEXT stub, "Message absent from node". The
+  // re-served copy arrives under the SAME id, so this shape must be flagged
+  // — the old code deduped it away and the stash never saw the media.
+  assert.equal(isContentWithheldStub({
+    messageStubType: "CIPHERTEXT",
+    messageStubParameters: ["Message absent from node"]
+  }), true, "string stub type must be flagged");
+  assert.equal(isContentWithheldStub({
+    messageStubType: 9,
+    messageStubParameters: ["Message absent from node"]
+  }), true, "numeric stub type must be flagged");
+  // A key-refresh failure is NOT re-served as a placeholder — it must still
+  // be deduped like any other message.
+  assert.equal(isContentWithheldStub({
+    messageStubType: 9,
+    messageStubParameters: ["Key used already or never filled"]
+  }), false, "missing-keys stub is not a withheld arrival");
+  // Ordinary messages are ordinary.
+  assert.equal(isContentWithheldStub({ message: { conversation: "hi" } }), false);
+  assert.equal(isContentWithheldStub({}), false);
+  assert.equal(isContentWithheldStub(null), false);
+});
