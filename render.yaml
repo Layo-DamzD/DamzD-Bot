@@ -1,0 +1,50 @@
+# Render Blueprint — DamzD WhatsApp bot (v2.0.1, FEI-XMD engine underneath)
+# Deploy: Render Dashboard → New → Blueprint → pick this repo.
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: damzd
+    runtime: node
+    plan: free
+    healthCheckPath: /health
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22.12.0"
+      - key: BOT_NAME
+        value: DamzD
+      - key: BOT_VERSION
+        value: "2.3.3"
+      - key: OWNER_NAME
+        sync: false    # your name, e.g. Layo
+      - key: OWNER_NUMBER
+        sync: false    # international format, no + — e.g. 2348000000000
+      - key: GROQ_API_KEY
+        sync: false    # free key from console.groq.com
+      # public = everyone in chats can use commands; private = owner only.
+      # Flip from WhatsApp with .mode if the engine gains one.
+      - key: BOT_MODE
+        value: public
+      - key: PREFIX
+        value: "."
+      - key: LOG_LEVEL
+        value: warn
+      # Where the bot keeps its pairing session and the view-once/activity
+      # stores. Render free disks are ephemeral — a redeploy re-pairs.
+      - key: FEI_SESSION_DIR
+        value: ./auth_info_baileys
+      - key: FEI_DATA_DIR
+        value: ./data
+      # After the first deploy, set this to the service URL Render gives you
+      # (e.g. https://damzd.onrender.com) — .menu and the connect card show it.
+      - key: BOT_URL
+        sync: false
+      # Full mainstream songs via .song need this key (get one at
+      # apis.nabeestech.com). Without it .song still delivers full tracks
+      # from Audius, Audiomack and SoundCloud whenever the artist's real
+      # upload is there, and otherwise the identified song + YouTube link —
+      # no 30-second previews, ever.
+      - key: NABEES_API_KEY
+        sync: false
