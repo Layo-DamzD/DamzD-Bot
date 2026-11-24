@@ -1,5 +1,16 @@
 const digits = value => String(value || "").replace(/\D/g, "");
 
+// The deployed package.json IS the running release — read the version from
+// it directly (single source of truth) so the connect card and menu never
+// show a stale BOT_VERSION from an env var nobody synced.
+import { readFileSync } from "node:fs";
+let packageVersion = "";
+try {
+  packageVersion = String(
+    JSON.parse(readFileSync(new URL("../package.json", import.meta.url))).version || ""
+  );
+} catch { /* fall back to BOT_VERSION, then the historic default */ }
+
 const configuredOwnerNumber = digits(process.env.OWNER_NUMBER);
 const ownerNumber = configuredOwnerNumber || "2348000000000";
 const configuredPrefix = process.env.PREFIX;
@@ -12,7 +23,7 @@ const channel = Object.freeze({
 
 export default Object.freeze({
   name: String(process.env.BOT_NAME || "DamzD").trim() || "DamzD",
-  version: String(process.env.BOT_VERSION || "2.1.0").trim() || "1.0.0",
+  version: packageVersion || String(process.env.BOT_VERSION || "2.1.0").trim() || "1.0.0",
   prefix,
   ownerName: String(process.env.OWNER_NAME || "DamzD").trim() || "DamzD",
   ownerNumber,
