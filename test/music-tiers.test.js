@@ -13,7 +13,8 @@ import {
   scUploaderOk,
   uploaderIsTheArtist,
   amUploaderOk,
-  pickAudiomackSong
+  pickAudiomackSong,
+  isAfricanMusic
 } from "../lib/render-music.js";
 
 test("artistMatches: the official artist matches its own uploads", () => {
@@ -173,6 +174,37 @@ test("amUploaderOk: re-uploaders, banned and unverified accounts fail", () => {
   assert.equal(amUploaderOk({ uploader: { url_slug: "djlandlord", name: "Dj Landlord", verified: "banned" } }, "Asake"), false, "DJ mix account");
   assert.equal(amUploaderOk({ uploader: { url_slug: "axxel-phonky", name: "PHXNKY ZXNT", verified: "authenticated-declined" } }, "Kordhell"), false, "declined verification");
   assert.equal(amUploaderOk({}, "Asake"), false, "no uploader object");
+});
+
+test("amUploaderOk (v2.3.4 strict): a shared word is NOT enough", () => {
+  // the exact leak the user hit: "The Weeknd" must not match any verified
+  // "The ..." Naija account — the strict gate needs most of the artist name
+  assert.equal(amUploaderOk({ uploader: { url_slug: "the-naija-sound", name: "The Naija Sound", verified: "yes" } }, "The Weeknd"), false, "shared 'the' only");
+  assert.equal(amUploaderOk({ uploader: { url_slug: "the-official-queen", name: "The Official Queen", verified: "yes" } }, "The Weeknd"), false, "verified but different act");
+  // embedded longest word still passes (official handles embed the name)
+  assert.ok(amUploaderOk({ uploader: { url_slug: "heisrema", name: "Rema", verified: "yes" } }, "Rema"), "heisrema IS Rema");
+  assert.ok(amUploaderOk({ uploader: { url_slug: "burnaboy", name: "Burna Boy", verified: "yes" } }, "Burna Boy"), "burnaboy IS Burna Boy");
+  // multi-word artist: an account carrying just one word is not the act
+  assert.equal(amUploaderOk({ uploader: { url_slug: "boy-genius", name: "Boy Genius", verified: "yes" } }, "Burna Boy"), false, "'boy' alone is not Burna Boy");
+});
+
+test("isAfricanMusic: Apple genre decides, Western genres skip the rung", () => {
+  // African genres from Apple's oracle
+  assert.ok(isAfricanMusic("Afrobeats", "Asake"));
+  assert.ok(isAfricanMusic("Worldwide", "Burna Boy"));
+  assert.ok(isAfricanMusic("Amapiano", "Kabza De Small"));
+  // Western genres → NOT African → Audiomack rung skipped
+  assert.equal(isAfricanMusic("Pop", "The Weeknd"), false, "The Weeknd is Pop");
+  assert.equal(isAfricanMusic("Alternative", "Tame Impala"), false);
+  assert.equal(isAfricanMusic("Hip-Hop/Rap", "Travis Scott"), false);
+  assert.equal(isAfricanMusic("Rock", "Queen"), false);
+  // generic/missing genre + a known African artist name → gate opens
+  assert.ok(isAfricanMusic("", "Asake"));
+  assert.ok(isAfricanMusic("Pop", "Wizkid"), "known African act under a generic genre label");
+  assert.ok(isAfricanMusic("Hip-Hop/Rap", "Olamide"));
+  // Western artist, no genre → stays closed
+  assert.equal(isAfricanMusic("", "The Weeknd"), false);
+  assert.equal(isAfricanMusic("", "Dua Lipa"), false);
 });
 
 test("pickAudiomackSong: official full upload wins, everything else is skipped", () => {
