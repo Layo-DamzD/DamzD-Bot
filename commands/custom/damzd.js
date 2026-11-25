@@ -98,6 +98,32 @@ export async function recoverBuffer(ctx, cached, quoted, quotedKey = null) {
       Number(ctx.msg?.messageTimestamp || 0), errors, "quote");
     if (official) return { buffer: official, node: null };
   }
+  // 2b) THE QUOTE-RETRY PATH (v2.4.1 field fix): WhatsApp strips the media
+  //     location out of view-once quotes — the url field is there but empty,
+  //     so Baileys' official downloader dies with status 400, and 400 is NOT
+  //     in its reupload list [410, 404]. It never asks the sender's phone.
+  //     We run the media-retry ourselves: updateMediaMessage needs only the
+  //     message key and the mediaKey the quote still carries, and hands back
+  //     a FRESH node with a live directPath.
+  if (quoted && fallbackKey?.id) {
+    const freshQuote = await refreshQuotedMedia(ctx, fallbackKey, quoted, errors);
+    if (freshQuote) {
+      try {
+        const { downloadContentFromMessage } = await import("@whiskeysockets/baileys");
+        const kind = freshQuote.kind === "stickerMessage" ? "sticker" : freshQuote.kind.replace("Message", "");
+        const stream = await downloadContentFromMessage(freshQuote.node, kind);
+        const chunks = [];
+        for await (const chunk of stream) chunks.push(chunk);
+        const buffer = Buffer.concat(chunks);
+        if (buffer.length) return { buffer, node: freshQuote.node };
+        errors.push("quote-retry: empty stream");
+      } catch (error) {
+        errors.push("quote-retry download: " + String(error?.message || error).slice(0, 110));
+      }
+    } else if (!errors.some(line => line.startsWith("quote-retry"))) {
+      errors.push("quote-retry: no fresh location returned");
+    }
+  }
   // 3) The stashed full-metadata node (what the bot actually received live).
   if (cached?.node) {
     try {
@@ -157,6 +183,38 @@ async function refreshMediaLocation(ctx, key, node) {
     const fresh = updated?.message?.[nodeKey] || updated?.[nodeKey];
     return (fresh?.url || fresh?.directPath) ? fresh : null;
   } catch {
+    return null;
+  }
+}
+
+// The media-retry protocol run DIRECTLY on a quoted view-once copy (v2.4.1).
+// The quote carries mediaKey but no usable URL — updateMediaMessage needs
+// exactly that: it asks WhatsApp, WhatsApp asks the sender's phone, and the
+// fresh directPath comes back. Exported for tests.
+export async function refreshQuotedMedia(ctx, key, quoted, errors = null) {
+  try {
+    const inner = unwrapMessage(quoted);
+    const nodeKey = ["imageMessage", "videoMessage", "audioMessage", "stickerMessage", "documentMessage"]
+      .find(k => inner?.[k]?.mediaKey);
+    if (!nodeKey) {
+      if (errors) errors.push("quote-retry: quote carries no mediaKey");
+      return null;
+    }
+    const updated = await ctx.sock.updateMediaMessage({
+      key: {
+        remoteJid: String(key.remoteJid || ""),
+        id: String(key.id || ""),
+        fromMe: Boolean(key.fromMe),
+        ...(key.participant ? { participant: String(key.participant) } : {})
+      },
+      message: { [nodeKey]: inner[nodeKey] }
+    });
+    const fresh = updated?.message?.[nodeKey] || inner[nodeKey];
+    return (fresh?.url || fresh?.directPath) ? { node: fresh, kind: nodeKey } : null;
+  } catch (error) {
+    // A refusal carries the reason: MISSING = the view-once was opened or
+    // expired on the sender's phone, and WhatsApp will not re-serve it.
+    if (errors) errors.push("quote-retry: " + String(error?.message || error).slice(0, 110));
     return null;
   }
 }

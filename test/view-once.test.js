@@ -193,6 +193,47 @@ test("recoverBuffer reports what it tried instead of failing flat (v2.4.0)", asy
   assert.match(String(result?.failure || ""), /no source had the bytes/i);
 });
 
+test("quote-retry runs the media-retry protocol on a URL-less quote (v2.4.1)", async () => {
+  const { refreshQuotedMedia } = await import("../commands/custom/damzd.js");
+  const mediaKey = Buffer.from("0123456789abcdef0123456789abcdef", "utf8");
+  const node = { mediaKey, mimetype: "image/jpeg", url: "" };
+  // The field shape: WhatsApp keeps mediaKey but empties the location.
+  const quoted = { viewOnceMessageV2: { message: { imageMessage: node } } };
+  const key = {
+    remoteJid: "2348000000000@s.whatsapp.net",
+    id: "QUOTED-ID",
+    fromMe: false,
+    participant: "2348111111111@s.whatsapp.net"
+  };
+  const errors = [];
+  const seen = [];
+  const ctx = {
+    sock: {
+      updateMediaMessage: async request => {
+        seen.push(request);
+        return { message: { imageMessage: { ...node, directPath: "/v/t62.7118-24/fresh", url: "https://mmg.whatsapp.net/v/t62.7118-24/fresh" } } };
+      }
+    }
+  };
+  const fresh = await refreshQuotedMedia(ctx, key, quoted, errors);
+  assert.ok(fresh?.node?.url, "the refreshed node carries a live URL");
+  assert.equal(fresh.kind, "imageMessage");
+  assert.equal(seen.length, 1, "exactly one retry request");
+  assert.equal(seen[0].key.id, "QUOTED-ID");
+  assert.equal(seen[0].key.participant, key.participant, "the sender's jid routes the retry");
+  assert.equal(Buffer.isBuffer(seen[0].message.imageMessage.mediaKey), true, "the quoted mediaKey rides along");
+  // A refusal is recorded with its reason, not swallowed.
+  const ctxRefuse = {
+    sock: { updateMediaMessage: async () => { throw new Error("Media re-upload failed by device (MISSING)"); } }
+  };
+  assert.equal(await refreshQuotedMedia(ctxRefuse, key, quoted, errors), null);
+  assert.ok(errors.some(line => /MISSING/.test(line)), "refusal detail reaches the report");
+  // A quote without mediaKey cannot be retried at all.
+  const noKey = { viewOnceMessageV2: { message: { imageMessage: { mimetype: "image/jpeg" } } } };
+  assert.equal(await refreshQuotedMedia(ctx, key, noKey, errors), null);
+  assert.ok(errors.some(line => /no mediaKey/.test(line)));
+});
+
 test("withheld-content stubs never claim the dedup slot (v2.3.5)", async () => {
   const { isContentWithheldStub } = await import("../lib/whatsapp-runtime.js");
   // The exact shape Baileys upserts when WhatsApp withholds a view-once from
