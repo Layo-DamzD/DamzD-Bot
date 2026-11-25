@@ -259,3 +259,95 @@ test("withheld-content stubs never claim the dedup slot (v2.3.5)", async () => {
   assert.equal(isContentWithheldStub({}), false);
   assert.equal(isContentWithheldStub(null), false);
 });
+
+test("withheld stubs leave a marker the re-serve overwrites (v2.4.2)", async () => {
+  const { stashWithheldStub, stashViewOnce, findCachedViewOnce } =
+    await import("../src/damzd/viewonce.js");
+  const key = {
+    remoteJid: "2348000000000@s.whatsapp.net",
+    id: "STUBMARK1",
+    fromMe: false,
+    participant: "2348111111111@s.whatsapp.net"
+  };
+  // The stub arrival: only the key is real, the content is withheld.
+  assert.equal(stashWithheldStub({ key, messageTimestamp: 1800000000 }), true,
+    "the marker is recorded");
+  const marker = findCachedViewOnce(key.remoteJid, key.id);
+  assert.ok(marker, "a .ggs during the re-serve window finds the marker");
+  assert.equal(marker.marker, true, "flagged as a marker, not a real arrival");
+  assert.equal(marker.node, null, "no node — the bytes are not here yet");
+  assert.equal(marker.kind, "unknown");
+  assert.equal(marker.fromMe, false);
+  assert.equal(marker.sender, "2348111111111@s.whatsapp.net");
+  // Duplicate stubs are absorbed, and a real entry blocks a new marker.
+  assert.equal(stashWithheldStub({ key, messageTimestamp: 1800000000 }), false);
+  // The re-served copy (same stanza id, full content) replaces the marker.
+  const served = {
+    key,
+    messageTimestamp: 1800000042,
+    message: {
+      viewOnceMessageV2: {
+        message: {
+          imageMessage: {
+            url: "https://mmg.whatsapp.net/v/t62.7118-24/re-served",
+            mimetype: "image/jpeg",
+            mediaKey: Buffer.alloc(32, 7)
+          }
+        }
+      }
+    }
+  };
+  assert.equal(stashViewOnce(served), true, "the re-served copy is stashed");
+  const fresh = findCachedViewOnce(key.remoteJid, key.id);
+  assert.ok(fresh?.node?.url, "the real node replaced the marker");
+  assert.equal(fresh.marker, false, "no longer a marker");
+  assert.equal(fresh.kind, "image");
+  assert.equal(fresh.wasViewOnce, true);
+});
+
+test("late recovery auto-delivers when the re-serve lands after .ggs (v2.4.2)", async () => {
+  const os = await import("node:os");
+  const fsMod = await import("node:fs");
+  const pathMod = await import("node:path");
+  const directory = fsMod.mkdtempSync(pathMod.join(os.tmpdir(), "damzd-vvlate-"));
+  const { initViewOnceStore, stashWithheldStub, testSeedCapture, findCachedViewOnce } =
+    await import("../src/damzd/viewonce.js");
+  const { scheduleLateRecovery } = await import("../commands/custom/damzd.js");
+  initViewOnceStore(directory);
+
+  const key = {
+    remoteJid: "2348000000000@s.whatsapp.net",
+    id: "LATEDELIV1",
+    fromMe: false,
+    participant: "2348111111111@s.whatsapp.net"
+  };
+  assert.equal(stashWithheldStub({ key, messageTimestamp: 1800000000 }), true);
+  assert.ok(findCachedViewOnce(key.remoteJid, key.id).marker, "marker present");
+
+  const ctx = {
+    jid: key.remoteJid,
+    msg: { messageTimestamp: 1800000100 },
+    sock: { user: { id: "2348000000000@s.whatsapp.net" } },
+    config: { ownerNumber: "2348000000000" }
+  };
+  const quotedKey = { remoteJid: key.remoteJid, id: key.id, fromMe: false, participant: key.participant };
+  const deliveries = [];
+  const deliver = (buffer, node, kind) => deliveries.push({ buffer, node, kind });
+
+  // Armed while WhatsApp still holds the bytes: nothing may be delivered.
+  scheduleLateRecovery(ctx, quotedKey, null, deliver, [80, 160]);
+  await new Promise(resolve => setTimeout(resolve, 220));
+  assert.equal(deliveries.length, 0, "no delivery without the bytes");
+  // The re-serve landed and the prefetch captured it — seed the same state.
+  assert.equal(testSeedCapture(key.remoteJid, key.id, Buffer.from("late-bytes")), true);
+  // A re-fired .ggs arms a fresh late check (the first one disarmed itself).
+  scheduleLateRecovery(ctx, quotedKey, null, deliver, [80, 160]);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(deliveries.length, 1, "exactly one auto-delivery once the bytes land");
+  assert.equal(String(deliveries[0].buffer), "late-bytes");
+  assert.equal(deliveries[0].kind, "image", "kind inferred when the marker never learned it");
+  // The armed stamp is cleared after delivery — a later .ggs can arm again.
+  scheduleLateRecovery(ctx, quotedKey, null, deliver, [40, 80]);
+  await new Promise(resolve => setTimeout(resolve, 160));
+  assert.equal(deliveries.length, 2, "recovery stays repeatable while the bytes exist");
+});

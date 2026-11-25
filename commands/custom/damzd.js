@@ -231,6 +231,58 @@ function mediaNodeKeyOf(kind) {
   return ({ image: "imageMessage", video: "videoMessage", sticker: "stickerMessage", audio: "audioMessage" })[kind] || "imageMessage";
 }
 
+// When a .ggs lands inside WhatsApp's re-serve window, the stash fills
+// seconds AFTER the command already answered — and the sequential message
+// queue means waiting inside the command would block the very arrival it
+// waits for. So the late check runs OUTSIDE the command: two short timers
+// re-read the stash and deliver automatically when the bytes land.
+const lateArmed = new Set();
+
+function inferKindFromNode(node) {
+  const mime = String(node?.mimetype || "");
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "image";
+}
+
+export function scheduleLateRecovery(ctx, quotedKey, quoted, deliver, delays = [4000, 10000]) {
+  const chat = String(quotedKey?.remoteJid || ctx.jid || "");
+  const id = String(quotedKey?.id || "");
+  if (!id) return;
+  const stamp = chat + "|" + id;
+  if (lateArmed.has(stamp)) return;
+  lateArmed.add(stamp);
+  if (lateArmed.size > 100) {
+    for (const key of lateArmed) { lateArmed.delete(key); if (lateArmed.size <= 60) break; }
+  }
+  let done = false;
+  for (const delayMs of delays) {
+    const last = delayMs >= Math.max(...delays);
+    setTimeout(() => {
+      void (async () => {
+        try {
+          if (!done) {
+            const fresh = findCachedViewOnce(chat, id) || findCachedViewOnce("", id);
+            if (fresh && (fresh.node || fresh.file)) {
+              const result = await recoverBuffer(ctx, {
+                ...fresh,
+                stanzaId: id,
+                nodeKind: fresh.nodeKind || mediaNodeKeyOf(fresh.kind === "unknown" ? "image" : fresh.kind)
+              }, null, quotedKey);
+              if (result?.buffer) {
+                done = true;
+                await deliver(result.buffer, result.node || fresh.node,
+                  fresh.kind && fresh.kind !== "unknown" ? fresh.kind : inferKindFromNode(result.node || fresh.node));
+              }
+            }
+          }
+        } catch { /* a late check must never break anything */ }
+        if (last) lateArmed.delete(stamp);
+      })();
+    }, delayMs);
+  }
+}
+
 async function sendRecovered(ctx, kind, buffer, origin, node) {
   const target = ownerChatJid(ctx);
   if (!target) throw new Error("I could not resolve your own chat");
@@ -274,7 +326,9 @@ export default [
         await ctx.reply(GG_LINES[Math.floor(Math.random() * GG_LINES.length)]);
         return;
       }
-      const kind = cached?.kind || mediaKindOf(unwrapMessage(qc.quoted));
+      const kind = (cached?.kind && cached.kind !== "unknown")
+        ? cached.kind
+        : mediaKindOf(unwrapMessage(qc.quoted));
       const nodeKind = mediaNodeKeyOf(kind);
       // The quote's participant is the ORIGINAL sender — the best retry key
       // when the stash entry somehow lost its own. fromMe is COMPUTED, the
@@ -295,7 +349,14 @@ export default [
         nodeKind
       } : null, qc.quoted, quotedKey);
       if (!result?.buffer) {
-        await ctx.reply("⚠️ I saw that view-once, but WhatsApp would not hand the bytes back this time.\nTried: " + (result?.failure || "no source had the bytes") + "\nIf it is still un-opened, react 🔓 to it and I will try again while the sender is online.");
+        const held = cached?.marker === true;
+        await ctx.reply("⚠️ I saw that view-once, but WhatsApp would not hand the bytes back this time.\nTried: " +
+          (result?.failure || "no source had the bytes") +
+          (held
+            ? "\n\nWhatsApp withheld the original from this device and the re-serve hasn't landed yet. If it lands in the next few seconds I will deliver it here automatically. Otherwise: keep the view-once un-opened on the sender's phone, resend while THEIR phone is online and unlocked, wait ~5 seconds, then try again."
+            : "\nIf it is still un-opened, react 🔓 to it and I will try again while the sender is online."));
+        scheduleLateRecovery(ctx, quotedKey, null, (buffer, node, lateKind) =>
+          sendRecovered(ctx, lateKind || kind, buffer, source, node));
         return;
       }
       await sendRecovered(ctx, kind, result.buffer, source, result.node);

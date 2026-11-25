@@ -299,6 +299,56 @@ function saveStash() {
   } catch { /* retried on the next tick */ }
 }
 
+// WhatsApp withheld a view-once from this device ("Message absent from
+// node"). Record a MARKER so a .ggs fired during the re-serve window knows
+// the bytes are expected — and can tell that apart from a dead end. The
+// real copy (same stanza id) overwrites the marker the moment it lands.
+// Markers stay memory-only: initViewOnceStore skips node-less entries.
+export function stashWithheldStub(msg) {
+  try {
+    const chat = normalizeJid(String(msg?.key?.remoteJid || ""));
+    const stanzaId = String(msg?.key?.id || "");
+    if (!chat || !stanzaId || stash.has(chat + "|" + stanzaId)) return false;
+    stash.set(chat + "|" + stanzaId, {
+      node: null,
+      kind: "unknown",
+      at: Date.now(),
+      sender: normalizeJid(String(msg?.key?.participant || "")),
+      wasViewOnce: true,
+      marker: true,
+      chat,
+      fromMe: Boolean(msg?.key?.fromMe),
+      ts: Number(msg?.messageTimestamp || 0),
+      captureAttempts: 0,
+      captureError: ""
+    });
+    dirty = true;
+    prune();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Test hook: seeds the capture file a successful prefetch would have
+// written, so the late-delivery path can be exercised offline.
+export function testSeedCapture(chatJid, stanzaId, buffer) {
+  try {
+    const chat = normalizeJid(String(chatJid || ""));
+    const entry = stash.get(chat + "|" + String(stanzaId || ""));
+    if (!entry || !mediaPath || !Buffer.isBuffer(buffer)) return false;
+    const safe = (chat + "|" + String(stanzaId)).replace(/[^A-Za-z0-9._-]/g, "_").slice(-120);
+    const file = path.join(mediaPath, safe + ".bin");
+    fs.writeFileSync(file, buffer);
+    entry.file = file;
+    entry.size = buffer.length;
+    dirty = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function findCachedViewOnce(chatJid, stanzaId) {
   const id = String(stanzaId || "");
   if (!id) return null;
@@ -312,6 +362,7 @@ export function findCachedViewOnce(chatJid, stanzaId) {
     wasViewOnce: entry.wasViewOnce,
     chat: entry.chat,
     fromMe: entry.fromMe,
+    marker: entry.marker === true,
     captureAttempts: entry.captureAttempts,
     captureError: entry.captureError
   });

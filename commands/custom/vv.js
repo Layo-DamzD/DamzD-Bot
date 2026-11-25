@@ -28,7 +28,8 @@ import {
 import {
   hasViewOnceWrapper,
   mediaKindOf,
-  recoverBuffer
+  recoverBuffer,
+  scheduleLateRecovery
 } from "./damzd.js";
 
 const MEDIA_NODES = ["imageMessage", "videoMessage", "audioMessage", "documentMessage"];
@@ -146,8 +147,10 @@ async function recoverViewOnce(ctx) {
     };
   }
 
-  const kind = cached?.kind || (quoted ? mediaKindOf(unwrapMessage(quoted)) : "");
-  if (!kind || kind === "sticker") {
+  const kind = (cached?.kind && cached.kind !== "unknown")
+    ? cached.kind
+    : (quoted ? mediaKindOf(unwrapMessage(quoted)) : "image");
+  if (kind === "sticker") {
     return {
       error: "That view-once message carries no supported media (view-once " +
         "stickers and text are not supported)."
@@ -161,10 +164,16 @@ async function recoverViewOnce(ctx) {
     key
   );
   if (!result?.buffer) {
+    const held = cached?.marker === true;
     return {
       error: "I recognised this view-once, but WhatsApp would not hand the " +
         "bytes back this time.\nTried: " + (result?.failure || "no source had the bytes") +
-        "\nTry again while the sender's phone is online — or react 🔓 to it."
+        (held
+          ? "\n\nWhatsApp withheld the original from this device and the re-serve hasn't landed yet. If it lands in the next few seconds I will send it here automatically. Otherwise: keep the view-once un-opened on the sender's phone, resend while THEIR phone is online and unlocked, wait ~5 seconds, then try again."
+          : "\nTry again while the sender's phone is online — or react 🔓 to it."),
+      key,
+      quoted: quoteCarriesIt ? quoted : null,
+      kind
     };
   }
 
@@ -233,6 +242,12 @@ export default [
       const result = await recoverViewOnce(ctx);
       if (result.error) {
         await ctx.reply("⚠️ " + result.error);
+        // The re-serve may land seconds after this answer — the late check
+        // delivers it automatically instead of asking the user to re-try.
+        if (result.key) {
+          scheduleLateRecovery(ctx, result.key, null, (buffer, node, lateKind) =>
+            sendBrandedViewOnce(ctx, { kind: lateKind || result.kind, buffer, media: node || {} }));
+        }
         return;
       }
       await sendBrandedViewOnce(ctx, result);
@@ -246,6 +261,13 @@ export default [
       const result = await recoverViewOnce(ctx);
       if (result.error) {
         await ctx.reply("⚠️ " + result.error);
+        const target = normalizeJid(ctx.senderJid || "");
+        if (result.key && target) {
+          scheduleLateRecovery(ctx, result.key, null, async (buffer, node, lateKind) => {
+            await ctx.sock.sendMessage(target, viewOncePayload({ kind: lateKind || result.kind, buffer, media: node || {} }));
+            await ctx.reply("✅ The late re-serve landed — the media is in your private chat with DamzD.");
+          });
+        }
         return;
       }
 
